@@ -1,54 +1,86 @@
-name: Redeploy Bot(s) on ECS
+name: Redeploy Bot (one or all)
 
 on:
   workflow_dispatch:
     inputs:
-      bot_user:
-        description: "Usuário do bot (ex.: n8w0lff) ou 'all' para todos"
+      user:
+        description: "User do bot (ex.: n8w0lff) ou 'all'"
         required: true
+        default: "all"
+      aws-region:
+        description: "AWS Region"
+        required: true
+        default: "us-east-1"
+      project-name:
+        description: "Project name (prefixo)"
+        required: true
+        default: "lukras-platform"
 
 jobs:
   redeploy:
     runs-on: ubuntu-latest
-    environment: prod
-    env:
-      AWS_REGION: ${{ vars.AWS_REGION }}
-      PROJECT_NAME: ${{ vars.PROJECT_NAME }}
-      CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
-    steps:
-      - name: Check inputs
-        run: |
-          echo "bot_user=${{ github.event.inputs.bot_user }}"
-          echo "PROJECT_NAME=$PROJECT_NAME"
-          echo "CLUSTER_NAME=$CLUSTER_NAME"
-          echo "AWS_REGION=$AWS_REGION"
 
-      - name: Configure AWS credentials
+    steps:
+      - name: Checkout infra repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS creds
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            ${{ vars.AWS_REGION }}
+          aws-region:            ${{ github.event.inputs.aws-region }}
 
-      - name: Redeploy one or all
-        shell: bash
+      - name: Install AWS CLI
+        uses: unfor19/install-aws-cli-action@v1
+
+      - name: Read users from terraform.tfvars
+        id: users
+        run: |
+          USERS=$(grep -A50 '^users' terraform.tfvars | tr -d '[:space:]' | sed -n 's/^users=\[\(.*\)\]/\1/p' | tr -d '"' )
+          # USERS like: n8w0lff,satoshi
+          echo "users=${USERS}" >> $GITHUB_OUTPUT
+
+      - name: Redeploy
+        env:
+          REGION:  ${{ github.event.inputs.aws-region }}
+          PROJECT: ${{ github.event.inputs.project-name }}
+          INPUT_USER: ${{ github.event.inputs.user }}
+          USERS_CSV:  ${{ steps.users.outputs.users }}
         run: |
           set -euo pipefail
-          USER_INPUT="${{ github.event.inputs.bot_user }}"
 
-          if [[ "$USER_INPUT" == "all" ]]; then
-            echo "Redeploy de todos os services do cluster: $CLUSTER_NAME"
-            # Lista todos os services e força novo deployment
-            aws ecs list-services --cluster "$CLUSTER_NAME" --query 'serviceArns[]' --output text | tr '\t' '\n' | while read -r SVC; do
-              if [[ -z "$SVC" ]]; then continue; fi
-              NAME=$(basename "$SVC")
-              echo "Forçando redeploy em: $NAME"
-              aws ecs update-service --cluster "$CLUSTER_NAME" --service "$NAME" --force-new-deployment >/dev/null
+          CLUSTER="${PROJECT}-cluster"
+
+          redeploy_one() {
+            local user="$1"
+            local family="${PROJECT}-${user}"
+            local service="${PROJECT}-${user}"
+
+            echo "==> Registering new task def revision (family: ${family})"
+            # Força uma nova revisão com a mesma definição atual
+            ARN=$(aws ecs describe-task-definition --task-definition "${family}" --query 'taskDefinition.taskDefinitionArn' --output text)
+            REV_JSON=$(aws ecs describe-task-definition --task-definition "${family}" --query 'taskDefinition' )
+            # Re-registra (remove campos imutáveis)
+            CLEAN=$(echo "$REV_JSON" | jq 'del(.status, .taskDefinitionArn, .revision, .requiresAttributes, .registeredAt, .registeredBy, .compatibilities)')
+            NEW_ARN=$(aws ecs register-task-definition --cli-input-json "{\"family\":\"${family}\",\"requiresCompatibilities\":$(echo "$CLEAN" | jq -c '.requiresCompatibilities'),\"networkMode\":$(echo "$CLEAN" | jq -c '.networkMode'),\"cpu\":$(echo "$CLEAN" | jq -c '.cpu'),\"memory\":$(echo "$CLEAN" | jq -c '.memory'),\"executionRoleArn\":$(echo "$CLEAN" | jq -c '.executionRoleArn'),\"taskRoleArn\":$(echo "$CLEAN" | jq -c '.taskRoleArn'),\"runtimePlatform\":$(echo "$CLEAN" | jq -c '.runtimePlatform'),\"containerDefinitions\":$(echo "$CLEAN" | jq -c '.containerDefinitions'),\"volumes\":$(echo "$CLEAN" | jq -c '.volumes')}" --query 'taskDefinition.taskDefinitionArn' --output text)
+
+            echo "==> Updating service ${service} to ${NEW_ARN}"
+            aws ecs update-service \
+              --cluster "${CLUSTER}" \
+              --service "${service}" \
+              --task-definition "${NEW_ARN}" \
+              --force-new-deployment >/dev/null
+
+            echo "-> OK: ${service}"
+          }
+
+          if [ "${INPUT_USER}" = "all" ]; then
+            IFS=',' read -ra USERS_ARR <<< "${USERS_CSV}"
+            for U in "${USERS_ARR[@]}"; do
+              [ -z "$U" ] && continue
+              redeploy_one "$U"
             done
           else
-            SERVICE_NAME="${PROJECT_NAME}-${USER_INPUT}"
-            echo "Redeploy do service: $SERVICE_NAME"
-            aws ecs update-service --cluster "$CLUSTER_NAME" --service "$SERVICE_NAME" --force-new-deployment >/dev/null
+            redeploy_one "${INPUT_USER}"
           fi
-
-          echo "OK"
