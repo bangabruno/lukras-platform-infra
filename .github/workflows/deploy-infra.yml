@@ -1,0 +1,43 @@
+name: Infra apply (Terraform)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout infra repo
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Configure AWS creds (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ steps.region.outputs.region }}
+
+      - name: Read region from terraform.tfvars
+        id: region
+        run: |
+          set -euo pipefail
+          REGION=$(awk -F'=' '/^\s*aws_region\s*=/{gsub(/[ "]/,"",$2);print $2}' terraform.tfvars)
+          echo "region=$REGION" >> $GITHUB_OUTPUT
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform apply
+        run: terraform apply -auto-approve
