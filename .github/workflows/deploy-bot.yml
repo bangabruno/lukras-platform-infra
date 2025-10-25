@@ -10,6 +10,7 @@ on:
 
 jobs:
   deploy:
+    environment: prod
     runs-on: ubuntu-latest
 
     steps:
