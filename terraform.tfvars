@@ -1,6 +1,5 @@
-aws_region    = "us-east-1"
-project_name  = "lukras-platform"
-enable_alb    = false
+aws_region     = "us-east-1"
+project_name   = "lukras-platform"
 
 # Usuários/bots ativos
 users = [
@@ -11,6 +10,9 @@ users = [
 container_image = "659528245383.dkr.ecr.us-east-1.amazonaws.com/trader-bot:latest"
 
 # Recursos por bot
-cpu         = 256
-memory      = 512
+cpu            = 256
+memory         = 512
 container_port = 8080
+
+# opcional
+az_count = 2

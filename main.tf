@@ -1,38 +1,38 @@
-# -----------------------------
-# AZ / locals
-# -----------------------------
+############################################
+# Provider & AZs
+############################################
+provider "aws" {
+  region = var.aws_region
+}
+
 data "aws_availability_zones" "available" {}
 
 locals {
   name_prefix = var.project_name
+  region      = var.aws_region
   azs         = slice(data.aws_availability_zones.available.names, 0, var.az_count)
-
-  # Facilita usar "for_each" com objetos enriquecidos por usuário
-  users = toset(var.users)
 }
 
-# -----------------------------
-# VPC
-# -----------------------------
+############################################
+# VPC, Subnets, Rotas
+############################################
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_support   = true
   enable_dns_hostnames = true
 
-  tags = {
-    Name = "${local.name_prefix}-vpc"
-  }
-}
+  tags = { Name = "${local.name_prefix}-vpc" }
 
-resource "aws_internet_gateway" "igw" {
-  vpc_id = aws_vpc.main.id
-  tags   = { Name = "${local.name_prefix}-igw" }
+  lifecycle {
+    prevent_destroy       = false
+    create_before_destroy = true
+  }
 }
 
 resource "aws_subnet" "public" {
   for_each = {
-    "${var.aws_region}a" = "10.0.0.0/24"
-    "${var.aws_region}b" = "10.0.1.0/24"
+    "${local.azs[0]}" = "10.0.0.0/24"
+    "${local.azs[1]}" = "10.0.1.0/24"
   }
 
   vpc_id                  = aws_vpc.main.id
@@ -45,26 +45,28 @@ resource "aws_subnet" "public" {
 
 resource "aws_subnet" "private" {
   for_each = {
-    "${var.aws_region}a" = "10.0.100.0/24"
-    "${var.aws_region}b" = "10.0.101.0/24"
+    "${local.azs[0]}" = "10.0.100.0/24"
+    "${local.azs[1]}" = "10.0.101.0/24"
   }
 
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = each.value
-  availability_zone       = each.key
-  map_public_ip_on_launch = false
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = each.value
+  availability_zone = each.key
 
   tags = { Name = "${local.name_prefix}-private-${each.key}" }
 }
 
+resource "aws_internet_gateway" "igw" {
+  vpc_id = aws_vpc.main.id
+  tags   = { Name = "${local.name_prefix}-igw" }
+}
+
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
-
   route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.igw.id
   }
-
   tags = { Name = "${local.name_prefix}-public-rt" }
 }
 
@@ -83,18 +85,15 @@ resource "aws_nat_gateway" "nat" {
   allocation_id = aws_eip.nat_eip.id
   subnet_id     = values(aws_subnet.public)[0].id
   depends_on    = [aws_internet_gateway.igw]
-
-  tags = { Name = "${local.name_prefix}-nat" }
+  tags          = { Name = "${local.name_prefix}-nat" }
 }
 
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
-
   route {
     cidr_block     = "0.0.0.0/0"
     nat_gateway_id = aws_nat_gateway.nat.id
   }
-
   tags = { Name = "${local.name_prefix}-private-rt" }
 }
 
@@ -104,27 +103,14 @@ resource "aws_route_table_association" "private_assoc" {
   route_table_id = aws_route_table.private.id
 }
 
-# -----------------------------
+############################################
 # Security Groups
-# -----------------------------
-resource "aws_security_group" "alb_sg" {
-  name        = "${local.name_prefix}-alb-sg"
+############################################
+# Para tasks ECS (somente saída; sem portas de entrada pois não expomos serviços)
+resource "aws_security_group" "ecs_sg" {
+  name        = "${local.name_prefix}-ecs-sg"
   vpc_id      = aws_vpc.main.id
-  description = "ALB security group - allows HTTP(S)"
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  description = "ECS tasks egress only"
 
   egress {
     from_port   = 0
@@ -133,35 +119,10 @@ resource "aws_security_group" "alb_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = { Name = "${local.name_prefix}-alb-sg" }
+  tags = { Name = "${local.name_prefix}-ecs-sg" }
 }
 
-# SG das ECS tasks (definido ANTES do EFS SG p/ evitar ciclos)
-resource "aws_security_group" "ecs_tasks" {
-  name        = "${local.name_prefix}-ecs-tasks"
-  vpc_id      = aws_vpc.main.id
-  description = "ECS tasks outbound & intra-cluster"
-
-  # Tráfego interno entre tasks, caso necessário
-  ingress {
-    from_port   = 0
-    to_port     = 65535
-    protocol    = "tcp"
-    self        = true
-  }
-
-  # Saída liberada (internet via NAT)
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = { Name = "${local.name_prefix}-ecs-tasks" }
-}
-
-# SG do EFS: permite NFS (2049) APENAS a partir das ECS tasks
+# Para EFS aceitar NFS (2049/TCP) apenas das ECS tasks
 resource "aws_security_group" "efs_sg" {
   name        = "${local.name_prefix}-efs-sg"
   description = "Allow NFS from ECS tasks"
@@ -172,7 +133,7 @@ resource "aws_security_group" "efs_sg" {
     from_port       = 2049
     to_port         = 2049
     protocol        = "tcp"
-    security_groups = [aws_security_group.ecs_tasks.id]
+    security_groups = [aws_security_group.ecs_sg.id]
   }
 
   egress {
@@ -185,17 +146,17 @@ resource "aws_security_group" "efs_sg" {
   tags = { Name = "${local.name_prefix}-efs-sg" }
 }
 
-# -----------------------------
-# Logs
-# -----------------------------
+############################################
+# CloudWatch Logs (console)
+############################################
 resource "aws_cloudwatch_log_group" "ecs" {
   name              = "/ecs/${local.name_prefix}"
   retention_in_days = 30
 }
 
-# -----------------------------
-# EFS: File System + Mount Targets + Access Points (por usuário)
-# -----------------------------
+############################################
+# EFS para logs (persistente)
+############################################
 resource "aws_efs_file_system" "bot_logs" {
   creation_token   = "${local.name_prefix}-bot-logs"
   performance_mode = "generalPurpose"
@@ -216,32 +177,9 @@ resource "aws_efs_mount_target" "bot_logs_mt" {
   security_groups = [aws_security_group.efs_sg.id]
 }
 
-# Access Point por usuário (raiz isolada /bots/<usuario>)
-resource "aws_efs_access_point" "bot_ap" {
-  for_each       = local.users
-  file_system_id = aws_efs_file_system.bot_logs.id
-
-  posix_user {
-    gid = 1000
-    uid = 1000
-  }
-
-  root_directory {
-    path = "/bots/${each.key}"
-
-    creation_info {
-      owner_gid   = 1000
-      owner_uid   = 1000
-      permissions = "0755"
-    }
-  }
-
-  tags = { Name = "${local.name_prefix}-ap-${each.key}" }
-}
-
-# -----------------------------
-# IAM (roles de execução)
-# -----------------------------
+############################################
+# IAM roles (exec + task) + acesso aos secrets
+############################################
 data "aws_iam_policy_document" "task_execution_assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -257,19 +195,41 @@ resource "aws_iam_role" "task_execution_role" {
   assume_role_policy = data.aws_iam_policy_document.task_execution_assume.json
 }
 
+# Política padrão de execução (logs, pull de imagem ECR)
 resource "aws_iam_role_policy_attachment" "exec_role_policy" {
   role       = aws_iam_role.task_execution_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+# Permitir GetSecretValue para secrets "prod/lukras/*"
+data "aws_iam_policy_document" "secrets_access" {
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = ["arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.me.account_id}:secret:prod/lukras/*"]
+  }
+}
+
+resource "aws_iam_policy" "secrets_access" {
+  name   = "${local.name_prefix}-secrets-access"
+  policy = data.aws_iam_policy_document.secrets_access.json
+}
+
+resource "aws_iam_role_policy_attachment" "exec_role_secrets" {
+  role       = aws_iam_role.task_execution_role.name
+  policy_arn = aws_iam_policy.secrets_access.arn
+}
+
+data "aws_caller_identity" "me" {}
+
+# Task role (se sua app precisar acessar AWS APIs diretamente)
 resource "aws_iam_role" "task_role" {
   name               = "${local.name_prefix}-task-role"
   assume_role_policy = data.aws_iam_policy_document.task_execution_assume.json
 }
 
-# -----------------------------
+############################################
 # ECS Cluster
-# -----------------------------
+############################################
 resource "aws_ecs_cluster" "this" {
   name = "${local.name_prefix}-cluster"
 }
@@ -279,88 +239,20 @@ resource "aws_ecs_cluster_capacity_providers" "this" {
   capacity_providers = ["FARGATE", "FARGATE_SPOT"]
 }
 
-# -----------------------------
-# (Opcional) ALB
-# -----------------------------
-resource "aws_lb" "alb" {
-  count              = var.enable_alb ? 1 : 0
-  name               = "${local.name_prefix}-alb"
-  internal           = false
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb_sg.id]
-  subnets            = [for s in aws_subnet.public : s.id]
+############################################
+# Secrets por usuário (1 secret JSON por bot)
+############################################
+# Exigimos que exista um secret por usuário: "prod/lukras/<user>"
+data "aws_secretsmanager_secret" "user_secret" {
+  for_each = toset(var.users)
+  name     = "prod/lukras/${each.key}"
 }
 
-resource "aws_lb_target_group" "tg" {
-  for_each = var.enable_alb ? { for u in var.users : u => u } : {}
-
-  name     = "${local.name_prefix}-${each.key}-tg"
-  port     = 80
-  protocol = "HTTP"
-  vpc_id   = aws_vpc.main.id
-
-  health_check {
-    path                = "/actuator/health"
-    protocol            = "HTTP"
-    matcher             = "200-399"
-    interval            = 30
-    unhealthy_threshold = 2
-    healthy_threshold   = 2
-  }
-}
-
-resource "aws_lb_listener" "http" {
-  count             = var.enable_alb ? 1 : 0
-  load_balancer_arn = aws_lb.alb[0].arn
-  port              = 80
-  protocol          = "HTTP"
-
-  default_action {
-    type = "fixed-response"
-    fixed_response {
-      content_type = "text/plain"
-      message_body = "Not found"
-      status_code  = "404"
-    }
-  }
-}
-
-resource "aws_lb_listener_rule" "bot_rules" {
-  for_each = var.enable_alb ? { for idx, u in var.users : u => idx } : {}
-
-  listener_arn = aws_lb_listener.http[0].arn
-  priority     = 100 + each.value
-
-  action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.tg[each.key].arn
-  }
-
-  condition {
-    path_pattern {
-      values = ["/${each.key}/*", "/${each.key}"]
-    }
-  }
-}
-
-# -----------------------------
-# Secrets por usuário
-# -----------------------------
-# Nome do Secret por usuário
-locals {
-  user_secret_names = { for u in var.users : u => "prod/lukras/${u}" }
-}
-
-data "aws_secretsmanager_secret" "by_user" {
-  for_each = local.user_secret_names
-  name     = each.value
-}
-
-# -----------------------------
-# Task Definitions (1 por usuário) + Service (1 por usuário)
-# -----------------------------
+############################################
+# Task Definition (1 por user) + EFS /<user> -> /app/logs
+############################################
 resource "aws_ecs_task_definition" "bot_task" {
-  for_each = local.users
+  for_each = toset(var.users)
 
   family                   = "${local.name_prefix}-${each.key}"
   network_mode             = "awsvpc"
@@ -375,31 +267,23 @@ resource "aws_ecs_task_definition" "bot_task" {
     operating_system_family = "LINUX"
   }
 
-  # Volume EFS via Access Point do usuário
+  # Monta o EFS no path /<user> e dentro do container em /app/logs
   volume {
     name = "bot-logs"
     efs_volume_configuration {
       file_system_id     = aws_efs_file_system.bot_logs.id
       transit_encryption = "ENABLED"
-      authorization_config {
-        access_point_id = aws_efs_access_point.bot_ap[each.key].id
-        iam             = "ENABLED"
-      }
-      # raiz do AP = /bots/<usuario>
-      root_directory = "/"
+      root_directory     = "/${each.key}"
     }
   }
 
   container_definitions = jsonencode([{
     name  = each.key
     image = var.container_image
-
     portMappings = [{
       containerPort = var.container_port
       hostPort      = var.container_port
-      protocol      = "tcp"
     }]
-
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -408,15 +292,15 @@ resource "aws_ecs_task_definition" "bot_task" {
         awslogs-stream-prefix = each.key
       }
     }
-
     mountPoints = [{
       sourceVolume  = "bot-logs"
       containerPath = "/app/logs"
       readOnly      = false
     }]
-
     environment = [
       { name = "BOT_NAME", value = each.key },
+
+      # seus parâmetros "fixos" (mantidos)
       { name = "LNM_ENABLED", value = "true" },
       { name = "LNM_LEVERAGE", value = "10" },
       { name = "LNM_GET_PRICE_EVERY_SECS", value = "3" },
@@ -438,21 +322,28 @@ resource "aws_ecs_task_definition" "bot_task" {
       { name = "HL_ORDER_TAKE_PROFIT_PERCENT", value = "0.006" },
       { name = "HL_MAX_MARGIN_ALLOCATED_PERCENT", value = "0.5" }
     ]
-
-    # Injeta todas as chaves de var.secret_keys a partir do Secret JSON de cada usuário
+    # secrets vindos do secret JSON "prod/lukras/<user>"
     secrets = [
-      for k in var.secret_keys : {
-        name      = k
-        valueFrom = "${data.aws_secretsmanager_secret.by_user[each.key].arn}:${k}::"
-      }
+      { name = "LNM_KEY",          valueFrom = "${data.aws_secretsmanager_secret.user_secret[each.key].arn}:LNM_KEY::" },
+      { name = "LNM_SECRET",       valueFrom = "${data.aws_secretsmanager_secret.user_secret[each.key].arn}:LNM_SECRET::" },
+      { name = "LNM_PASSPHRASE",   valueFrom = "${data.aws_secretsmanager_secret.user_secret[each.key].arn}:LNM_PASSPHRASE::" },
+      { name = "LNM_KEY1",         valueFrom = "${data.aws_secretsmanager_secret.user_secret[each.key].arn}:LNM_KEY1::" },
+      { name = "LNM_PASSPHRASE1",  valueFrom = "${data.aws_secretsmanager_secret.user_secret[each.key].arn}:LNM_PASSPHRASE1::" },
+      { name = "LNM_SECRET1",      valueFrom = "${data.aws_secretsmanager_secret.user_secret[each.key].arn}:LNM_SECRET1::" },
+      { name = "HL_PRIVATE_KEY",   valueFrom = "${data.aws_secretsmanager_secret.user_secret[each.key].arn}:HL_PRIVATE_KEY::" }
     ]
   }])
+
+  # Garantir que os Mount Targets existam antes do service tentar subir
+  depends_on = [aws_efs_mount_target.bot_logs_mt]
 }
 
+############################################
+# ECS Service (1 por user)
+############################################
 resource "aws_ecs_service" "bot_service" {
-  for_each = local.users
-
-  name            = "${var.project_name}-${each.key}"
+  for_each        = toset(var.users)
+  name            = "${local.name_prefix}-${each.key}"
   cluster         = aws_ecs_cluster.this.id
   launch_type     = "FARGATE"
   desired_count   = 1
@@ -461,36 +352,8 @@ resource "aws_ecs_service" "bot_service" {
   network_configuration {
     subnets          = [for s in aws_subnet.private : s.id]
     assign_public_ip = false
-    security_groups  = [aws_security_group.ecs_tasks.id]
+    security_groups  = [aws_security_group.ecs_sg.id]
   }
 
-  dynamic "load_balancer" {
-    for_each = var.enable_alb ? [1] : []
-    content {
-      target_group_arn = aws_lb_target_group.tg[each.key].arn
-      container_name   = each.key
-      container_port   = var.container_port
-    }
-  }
-
-  depends_on = var.enable_alb ? [aws_lb_listener.http] : []
-}
-
-# -----------------------------
-# Outputs úteis
-# -----------------------------
-output "cluster_name" {
-  value = aws_ecs_cluster.this.name
-}
-
-output "services" {
-  value = { for u in local.users : u => aws_ecs_service.bot_service[u].name }
-}
-
-output "efs_id" {
-  value = aws_efs_file_system.bot_logs.id
-}
-
-output "log_group" {
-  value = aws_cloudwatch_log_group.ecs.name
+  depends_on = [aws_efs_mount_target.bot_logs_mt]
 }
