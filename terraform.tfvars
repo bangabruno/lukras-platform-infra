@@ -1,5 +1,6 @@
-aws_region     = "us-east-1"
-project_name   = "lukras-platform"
+aws_region    = "us-east-1"
+project_name  = "lukras-platform"
+enable_alb    = false
 
 # Usuários/bots ativos
 users = [
@@ -14,5 +15,5 @@ cpu            = 256
 memory         = 512
 container_port = 8080
 
-# opcional
+# Opcional
 az_count = 2
