@@ -19,6 +19,7 @@ on:
 jobs:
   redeploy:
     runs-on: ubuntu-latest
+    environment: prod
 
     steps:
       - name: Checkout infra repo
@@ -34,11 +35,13 @@ jobs:
       - name: Install AWS CLI
         uses: unfor19/install-aws-cli-action@v1
 
+      - name: Sanity check caller identity
+        run: aws sts get-caller-identity
+
       - name: Read users from terraform.tfvars
         id: users
         run: |
           USERS=$(grep -A50 '^users' terraform.tfvars | tr -d '[:space:]' | sed -n 's/^users=\[\(.*\)\]/\1/p' | tr -d '"' )
-          # USERS like: n8w0lff,satoshi
           echo "users=${USERS}" >> $GITHUB_OUTPUT
 
       - name: Redeploy
@@ -58,12 +61,22 @@ jobs:
             local service="${PROJECT}-${user}"
 
             echo "==> Registering new task def revision (family: ${family})"
-            # Força uma nova revisão com a mesma definição atual
-            ARN=$(aws ecs describe-task-definition --task-definition "${family}" --query 'taskDefinition.taskDefinitionArn' --output text)
-            REV_JSON=$(aws ecs describe-task-definition --task-definition "${family}" --query 'taskDefinition' )
-            # Re-registra (remove campos imutáveis)
+            REV_JSON=$(aws ecs describe-task-definition --task-definition "${family}" --query 'taskDefinition')
             CLEAN=$(echo "$REV_JSON" | jq 'del(.status, .taskDefinitionArn, .revision, .requiresAttributes, .registeredAt, .registeredBy, .compatibilities)')
-            NEW_ARN=$(aws ecs register-task-definition --cli-input-json "{\"family\":\"${family}\",\"requiresCompatibilities\":$(echo "$CLEAN" | jq -c '.requiresCompatibilities'),\"networkMode\":$(echo "$CLEAN" | jq -c '.networkMode'),\"cpu\":$(echo "$CLEAN" | jq -c '.cpu'),\"memory\":$(echo "$CLEAN" | jq -c '.memory'),\"executionRoleArn\":$(echo "$CLEAN" | jq -c '.executionRoleArn'),\"taskRoleArn\":$(echo "$CLEAN" | jq -c '.taskRoleArn'),\"runtimePlatform\":$(echo "$CLEAN" | jq -c '.runtimePlatform'),\"containerDefinitions\":$(echo "$CLEAN" | jq -c '.containerDefinitions'),\"volumes\":$(echo "$CLEAN" | jq -c '.volumes')}" --query 'taskDefinition.taskDefinitionArn' --output text)
+            NEW_ARN=$(aws ecs register-task-definition \
+              --cli-input-json "$(jq -c '{
+                family,
+                requiresCompatibilities,
+                networkMode,
+                cpu,
+                memory,
+                executionRoleArn,
+                taskRoleArn,
+                runtimePlatform,
+                containerDefinitions,
+                volumes
+              }' --arg family "$family" <<< "$CLEAN")" \
+              --query 'taskDefinition.taskDefinitionArn' --output text)
 
             echo "==> Updating service ${service} to ${NEW_ARN}"
             aws ecs update-service \
