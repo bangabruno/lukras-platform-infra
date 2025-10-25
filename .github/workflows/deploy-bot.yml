@@ -1,59 +1,99 @@
-name: Deploy Bot to ECS
+name: Deploy bot (one or all)
 
 on:
   workflow_dispatch:
     inputs:
       user:
-        description: "Usuário do bot (ou 'all' para todos)"
+        description: "Informe um user específico ou 'all'"
         required: true
         default: "all"
 
 jobs:
   deploy:
-    environment: prod
     runs-on: ubuntu-latest
 
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      TF_VAR_FILE: terraform.tfvars
+
     steps:
-      - name: Checkout Code
+      - name: Checkout infra repo
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS creds (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ steps.region.outputs.region }}
 
-      - name: Deploy Bots
-        shell: bash
+      - name: Read region from terraform.tfvars
+        id: region
         run: |
           set -euo pipefail
+          REGION=$(awk -F'=' '/^\s*aws_region\s*=/{gsub(/[ "]/,"",$2);print $2}' "${TF_VAR_FILE}")
+          echo "region=$REGION" >> $GITHUB_OUTPUT
 
-          INPUT_USER="${{ github.event.inputs.user }}"
-          echo "User requested: $INPUT_USER"
+      - name: Compute service list
+        id: svc
+        run: |
+          set -euo pipefail
+          PROJECT=$(awk -F'=' '/^\s*project_name\s*=/{gsub(/[ "]/,"",$2);print $2}' "${TF_VAR_FILE}")
+          USER_INPUT="${{ github.event.inputs.user }}"
 
-          if [[ "$INPUT_USER" == "all" ]]; then
-            echo "==> Deploy para TODOS os usuários definidos no terraform.tfvars"
-            USERS=$(grep -o '"[^"]*"' terraform.tfvars | tr -d '"' | sed '1d') # remove project_name
+          if [ "$USER_INPUT" = "all" ]; then
+            # extrai as chaves (users) do bloco users = { ... }
+            USERS=$(awk '
+              $0 ~ /^\s*users\s*=\s*{/ {inblock=1; next}
+              inblock && $0 ~ /^}/ {inblock=0}
+              inblock && $0 ~ /^[[:space:]]*[A-Za-z0-9_-]+[[:space:]]*=/ {
+                key=$1; gsub(":","",key); gsub("=","",key); gsub(/[[:space:]]/,"",key);
+                print key
+              }' "${TF_VAR_FILE}" | tr '\n' ' ')
           else
-            echo "==> Deploy somente para: $INPUT_USER"
-            USERS="$INPUT_USER"
+            USERS="$USER_INPUT"
           fi
 
-          for USER in $USERS; do
-            SERVICE_NAME="lukras-platform-$USER"
-            echo ""
-            echo "--------------------------------------------------"
-            echo "Atualizando service: $SERVICE_NAME"
-            echo "--------------------------------------------------"
+          if [ -z "$USERS" ]; then
+            echo "Nenhum user encontrado."
+            exit 1
+          fi
 
-            aws ecs update-service \
-              --cluster "lukras-platform-cluster" \
-              --service "$SERVICE_NAME" \
-              --force-new-deployment
-
-            echo "✅ Deployment aplicado para: $SERVICE_NAME"
+          SVC_LIST=""
+          for U in $USERS; do
+            SVC_LIST="$SVC_LIST ${PROJECT}-${U}"
           done
 
-          echo ""
-          echo "🎯 Deploy Finalizado com Sucesso 🎯"
+          echo "services=${SVC_LIST}" >> $GITHUB_OUTPUT
+          echo "Services: ${SVC_LIST}"
+
+      - name: Force new deployment on existing services
+        run: |
+          set -euo pipefail
+          REGION="${{ steps.region.outputs.region }}"
+          for SVC in ${{ steps.svc.outputs.services }}; do
+            echo "--------------------------------------------------"
+            echo "Atualizando service: ${SVC}"
+            echo "--------------------------------------------------"
+            if aws ecs describe-services --cluster "${{ env.PROJECT_NAME }}-cluster" --services "$SVC" >/dev/null 2>&1; then
+              aws ecs update-service \
+                --cluster "${{ env.PROJECT_NAME }}-cluster" \
+                --service "$SVC" \
+                --force-new-deployment \
+                >/dev/null
+              echo "OK: force-new-deployment enviado para ${SVC}"
+            else
+              echo "AVISO: service ${SVC} não existe. Para ONBOARD, adicione o user no terraform.tfvars e rode 'deploy-infra'."
+            fi
+          done
+        env:
+          PROJECT_NAME: ${{ steps.project.outputs.name }}
+
+      - name: Read project from terraform.tfvars
+        id: project
+        run: |
+          set -euo pipefail
+          NAME=$(awk -F'=' '/^\s*project_name\s*=/{gsub(/[ "]/,"",$2);print $2}' "${TF_VAR_FILE}")
+          echo "name=$NAME" >> $GITHUB_OUTPUT
