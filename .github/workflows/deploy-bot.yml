@@ -1,0 +1,54 @@
+name: Redeploy Bot(s) on ECS
+
+on:
+  workflow_dispatch:
+    inputs:
+      bot_user:
+        description: "Usuário do bot (ex.: n8w0lff) ou 'all' para todos"
+        required: true
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+      CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
+    steps:
+      - name: Check inputs
+        run: |
+          echo "bot_user=${{ github.event.inputs.bot_user }}"
+          echo "PROJECT_NAME=$PROJECT_NAME"
+          echo "CLUSTER_NAME=$CLUSTER_NAME"
+          echo "AWS_REGION=$AWS_REGION"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ vars.AWS_REGION }}
+
+      - name: Redeploy one or all
+        shell: bash
+        run: |
+          set -euo pipefail
+          USER_INPUT="${{ github.event.inputs.bot_user }}"
+
+          if [[ "$USER_INPUT" == "all" ]]; then
+            echo "Redeploy de todos os services do cluster: $CLUSTER_NAME"
+            # Lista todos os services e força novo deployment
+            aws ecs list-services --cluster "$CLUSTER_NAME" --query 'serviceArns[]' --output text | tr '\t' '\n' | while read -r SVC; do
+              if [[ -z "$SVC" ]]; then continue; fi
+              NAME=$(basename "$SVC")
+              echo "Forçando redeploy em: $NAME"
+              aws ecs update-service --cluster "$CLUSTER_NAME" --service "$NAME" --force-new-deployment >/dev/null
+            done
+          else
+            SERVICE_NAME="${PROJECT_NAME}-${USER_INPUT}"
+            echo "Redeploy do service: $SERVICE_NAME"
+            aws ecs update-service --cluster "$CLUSTER_NAME" --service "$SERVICE_NAME" --force-new-deployment >/dev/null
+          fi
+
+          echo "OK"
