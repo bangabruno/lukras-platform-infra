@@ -45,11 +45,11 @@ data "aws_vpc" "main" {
 }
 
 # Subnets privadas em uso
-data "aws_subnet" "private_a" { id = "subnet-06c53b145439031a3" } # 10.0.100.0/24 us-east-1a
+data "aws_subnet" "private_a" { id = "subnet-0c88597264633b0ed" } # 10.0.100.0/24 us-east-1a
 data "aws_subnet" "private_b" { id = "subnet-01133a83253cbdc8d" } # 10.0.101.0/24 us-east-1b
 
 # (Se um dia for usar ALB, já tem públicas:)
-data "aws_subnet" "public_a"  { id = "subnet-0fba36c75cc949407" } # 10.0.0.0/24   us-east-1a
+data "aws_subnet" "public_a"  { id = "subnet-07a2cc0f0b856e6af" } # 10.0.0.0/24   us-east-1a
 data "aws_subnet" "public_b"  { id = "subnet-01c66fa7137b495a8" } # 10.0.1.0/24   us-east-1b
 
 locals {
