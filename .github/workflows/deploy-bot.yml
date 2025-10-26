@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-            
+          
           USERS=$(python3 - <<'PY'
           import re, json
           with open('terraform.tfvars','r') as f:
@@ -44,7 +44,7 @@ jobs:
     
           m = re.search(r'users\s*=\s*{(.*?)}\s*$', s, re.S|re.M)
           if not m:
-            print("[]")
+            print(json.dumps([]))
             raise SystemExit(0)
     
           block = m.group(1)
@@ -53,8 +53,9 @@ jobs:
           PY
           )
           
-          echo "users=${USERS}" >> "$GITHUB_OUTPUT"
-
+          echo "users<<EOF" >> $GITHUB_OUTPUT
+          echo "${USERS}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Determine targets
         id: targets
