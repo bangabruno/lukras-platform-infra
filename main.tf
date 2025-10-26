@@ -28,10 +28,13 @@ variable "cpu"            { type = number }
 variable "memory"         { type = number }
 variable "container_port" { type = number }
 
-# users = { "n8w0lff" = { ENV_NAME = "value", ... } }
+# users = { "n8w0lff" = { env = {...}, secrets = [...] } }
 variable "users" {
-  description = "Mapa de usuários -> mapa de variáveis simples (opcionais)."
-  type        = map(map(string))
+  description = "Mapa de usuários com variáveis de ambiente e secrets."
+  type = map(object({
+    env     = map(string)
+    secrets = list(string)
+  }))
 }
 
 ########################################
@@ -41,19 +44,14 @@ variable "users" {
 
 # VPC em uso (NÃO criar outra)
 data "aws_vpc" "main" {
-  #id = "vpc-0305525ea1ca6a1e1"
   id = "vpc-04bafb351cafaf66b"
 }
 
 # Subnets privadas em uso
-#data "aws_subnet" "private_a" { id = "subnet-0c88597264633b0ed" } # 10.0.100.0/24 us-east-1a
-#data "aws_subnet" "private_b" { id = "subnet-01133a83253cbdc8d" } # 10.0.101.0/24 us-east-1b
 data "aws_subnet" "private_a" { id = "subnet-06c53b145439031a3" } # 10.0.100.0/24 us-east-1a
 data "aws_subnet" "private_b" { id = "subnet-062a2285292ed20da" } # 10.0.101.0/24 us-east-1b
 
 # (Se um dia for usar ALB, já tem públicas:)
-#data "aws_subnet" "public_a"  { id = "subnet-07a2cc0f0b856e6af" } # 10.0.0.0/24   us-east-1a
-#data "aws_subnet" "public_b"  { id = "subnet-01c66fa7137b495a8" } # 10.0.1.0/24   us-east-1b
 data "aws_subnet" "public_a"  { id = "subnet-0fba36c75cc949407" } # 10.0.0.0/24   us-east-1a
 data "aws_subnet" "public_b"  { id = "subnet-0c646430a91b6d777" } # 10.0.1.0/24   us-east-1b
 
@@ -145,22 +143,18 @@ resource "aws_ecs_task_definition" "bot" {
         }
       }
 
-      # ENV simples por usuário (apenas as chaves presentes no tfvars)
+      # ENV simples por usuário
       environment = [
-        for k, v in var.users[each.key] : {
+        for k, v in each.value.env : {
           name  = k
           value = v
         }
         if v != null && trimspace(v) != ""
       ]
 
-      # Secrets no padrão "prod/lukras/<user>" — DEVEM existir já
+      # Secrets dinâmicos por usuário
       secrets = [
-        for secret_name in [
-          "LNM_KEY", "LNM_SECRET", "LNM_PASSPHRASE",
-          "LNM_KEY1", "LNM_SECRET1", "LNM_PASSPHRASE1",
-          "HL_PRIVATE_KEY"
-        ] : {
+        for secret_name in each.value.secrets : {
           name      = secret_name
           valueFrom = "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:prod/lukras/${each.key}:${secret_name}::"
         }

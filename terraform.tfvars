@@ -12,7 +12,7 @@ container_port = 8080
 
 # Variáveis simples por usuário (NÃO-SECRETS)
 users = {
-  n8w0lff = {
+  env = {
     USER_WALLET                            = "0x7Be83Fbf23E4a0241BFD1b97F1863D44b661B056"
     LNM_ENABLED                            = "true"
     LNM_LEVERAGE                           = "10"
@@ -34,10 +34,26 @@ users = {
     HL_ORDER_TAKE_PROFIT_PERCENT           = "0.006"
     HL_MAX_MARGIN_ALLOCATED_PERCENT        = "0.5"
   }
-  # Exemplo de outro user:
+  secrets = [
+    "LNM_KEY",
+    "LNM_SECRET",
+    "LNM_PASSPHRASE",
+    "LNM_KEY1",
+    "LNM_SECRET1",
+    "LNM_PASSPHRASE1",
+    "HL_PRIVATE_KEY"
+  ]
+  # Exemplo de user com apenas 1 conta LNM:
   # satoshi = {
-  #   USER_WALLET = "null"
-  #   LNM_ENABLED = "true"
-  #   ...
+  #   env = {
+  #     USER_WALLET = "0x..."
+  #     LNM_ENABLED = "true"
+  #   }
+  #   secrets = [
+  #     "LNM_KEY",
+  #     "LNM_SECRET",
+  #     "LNM_PASSPHRASE",
+  #     "HL_PRIVATE_KEY"
+  #   ]
   # }
 }
