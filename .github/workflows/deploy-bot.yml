@@ -4,96 +4,113 @@ on:
   workflow_dispatch:
     inputs:
       user:
-        description: "Informe um user específico ou 'all'"
+        description: "User (ex: n8w0lff) ou 'all'"
         required: true
-        default: "all"
+        type: string
+      image_tag:
+        description: "Tag da imagem (default: latest)"
+        required: false
+        type: string
+        default: "latest"
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    permissions:
-      id-token: write
-      contents: read
-
-    env:
-      TF_VAR_FILE: terraform.tfvars
-
     steps:
       - name: Checkout infra repo
         uses: actions/checkout@v4
 
-      - name: Configure AWS creds (OIDC)
+      - name: Configure AWS credentials (role to assume)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ steps.region.outputs.region }}
+          aws-region: us-east-1
 
-      - name: Read region from terraform.tfvars
-        id: region
+      - name: Parse tfvars for users
+        id: parse
         run: |
           set -euo pipefail
-          REGION=$(awk -F'=' '/^\s*aws_region\s*=/{gsub(/[ "]/,"",$2);print $2}' "${TF_VAR_FILE}")
-          echo "region=$REGION" >> $GITHUB_OUTPUT
+          USERS=$(python3 - <<'PY'
+  import re, json
+with open('terraform.tfvars','r') as f:
+  s=f.read()
+  m=re.search(r'users\s*=\s*{(.*?)}', s, re.S)
+if not m:
+  print(json.dumps([]))
+  raise SystemExit
+  block=m.group(1)
+  keys=re.findall(r'(\w+)\s*=', block)
+  print(json.dumps(keys))
+  PY
+  )
+  echo "users=${USERS}" >> $GITHUB_OUTPUT
 
-      - name: Compute service list
-        id: svc
-        run: |
-          set -euo pipefail
-          PROJECT=$(awk -F'=' '/^\s*project_name\s*=/{gsub(/[ "]/,"",$2);print $2}' "${TF_VAR_FILE}")
-          USER_INPUT="${{ github.event.inputs.user }}"
+- name: Determine targets
+  id: targets
+  run: |
+    set -euo pipefail
+    REQ="${{ github.event.inputs.user }}"
+    ALL=$(echo '${{ steps.parse.outputs.users }}' | jq -r '.[]')
+    if [ "$REQ" = "all" ]; then
+      TARGETS=$(printf "%s\n" $ALL | jq -R . | jq -s .)
+    else
+      TARGETS=$(printf "%s\n" "$REQ" | jq -R . | jq -s .)
+    fi
+    echo "targets=${TARGETS}" >> $GITHUB_OUTPUT
 
-          if [ "$USER_INPUT" = "all" ]; then
-            # extrai as chaves (users) do bloco users = { ... }
-            USERS=$(awk '
-              $0 ~ /^\s*users\s*=\s*{/ {inblock=1; next}
-              inblock && $0 ~ /^}/ {inblock=0}
-              inblock && $0 ~ /^[[:space:]]*[A-Za-z0-9_-]+[[:space:]]*=/ {
-                key=$1; gsub(":","",key); gsub("=","",key); gsub(/[[:space:]]/,"",key);
-                print key
-              }' "${TF_VAR_FILE}" | tr '\n' ' ')
-          else
-            USERS="$USER_INPUT"
-          fi
-
-          if [ -z "$USERS" ]; then
-            echo "Nenhum user encontrado."
-            exit 1
-          fi
-
-          SVC_LIST=""
-          for U in $USERS; do
-            SVC_LIST="$SVC_LIST ${PROJECT}-${U}"
-          done
-
-          echo "services=${SVC_LIST}" >> $GITHUB_OUTPUT
-          echo "Services: ${SVC_LIST}"
-
-      - name: Force new deployment on existing services
-        run: |
-          set -euo pipefail
-          REGION="${{ steps.region.outputs.region }}"
-          for SVC in ${{ steps.svc.outputs.services }}; do
-            echo "--------------------------------------------------"
-            echo "Atualizando service: ${SVC}"
-            echo "--------------------------------------------------"
-            if aws ecs describe-services --cluster "${{ env.PROJECT_NAME }}-cluster" --services "$SVC" >/dev/null 2>&1; then
-              aws ecs update-service \
-                --cluster "${{ env.PROJECT_NAME }}-cluster" \
-                --service "$SVC" \
-                --force-new-deployment \
-                >/dev/null
-              echo "OK: force-new-deployment enviado para ${SVC}"
-            else
-              echo "AVISO: service ${SVC} não existe. Para ONBOARD, adicione o user no terraform.tfvars e rode 'deploy-infra'."
-            fi
-          done
-        env:
-          PROJECT_NAME: ${{ steps.project.outputs.name }}
-
-      - name: Read project from terraform.tfvars
-        id: project
-        run: |
-          set -euo pipefail
-          NAME=$(awk -F'=' '/^\s*project_name\s*=/{gsub(/[ "]/,"",$2);print $2}' "${TF_VAR_FILE}")
-          echo "name=$NAME" >> $GITHUB_OUTPUT
+- name: Rollout each target
+  run: |
+    set -euo pipefail
+    IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+    REGION="us-east-1"
+    
+    PROJECT=$(grep '^project_name' terraform.tfvars | awk -F\" '{print $2}')
+    IMAGE=$(grep '^container_image' terraform.tfvars | awk -F\" '{print $2}')
+    BASE_IMAGE="${IMAGE%:*}"
+    
+    for USER in $(echo '${{ steps.targets.outputs.targets }}' | jq -r '.[]'); do
+      FAMILY="${PROJECT}-${USER}"
+      SERVICE="${PROJECT}-${USER}"
+      CLUSTER="${PROJECT}-cluster"
+    
+      echo "==> Deploy para user: ${USER}"
+      # Verifica se o service existe
+      if ! aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --query 'services[0].serviceName' --output text >/dev/null 2>&1; then
+        echo "::error::Service ${SERVICE} não encontrado. Execute o workflow 'infra-apply' para fazer o onboarding do usuário '${USER}'."
+        exit 1
+      fi
+    
+      NEW_IMAGE="${BASE_IMAGE}:${IMAGE_TAG}"
+    
+      # Cria nova revisão da task definition com a mesma config, apenas trocando a imagem
+      TD_ARN=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.taskDefinitionArn' --output text)
+    
+      # Gera nova JSON de containerDefinitions trocando somente imagem
+      CONTAINERS_JSON=$(aws ecs describe-task-definition --task-definition "$FAMILY" \
+        --query 'taskDefinition.containerDefinitions' | jq '.[0].image = "'"$NEW_IMAGE"'" | [.]')
+    
+      # Registra nova revisão (reaproveitando atributos atuais)
+      NEW_TD_ARN=$(aws ecs register-task-definition \
+        --family "$FAMILY" \
+        --execution-role-arn "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.executionRoleArn' --output text)" \
+        --network-mode "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.networkMode' --output text)" \
+        --requires-compatibilities "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.requiresCompatibilities' --output text)" \
+        --cpu "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.cpu' --output text)" \
+        --memory "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.memory' --output text)" \
+        --runtime-platform "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.runtimePlatform' --output json)" \
+        --volumes "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.volumes' --output json)" \
+        --container-definitions "$CONTAINERS_JSON" \
+        --query 'taskDefinition.taskDefinitionArn' --output text)
+    
+      echo "   Nova task definition: $NEW_TD_ARN"
+    
+      # Atualiza o service para nova revisão
+      aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --task-definition "$NEW_TD_ARN" >/dev/null
+      echo "   Service atualizado: $SERVICE"
+    done

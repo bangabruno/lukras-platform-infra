@@ -1,43 +1,150 @@
-name: Infra apply (Terraform)
+name: Infra apply (create-missing only)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   apply:
     runs-on: ubuntu-latest
 
-    permissions:
-      id-token: write
-      contents: read
-
     steps:
       - name: Checkout infra repo
         uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.6.6
-
-      - name: Configure AWS creds (OIDC)
+      - name: Configure AWS credentials (role to assume)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: us-east-1
 
-      - name: Read region from terraform.tfvars
-        id: region
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+
+      - name: Terraform Init
+        run: terraform init -input=false -reconfigure
+
+      - name: Import guard (shared resources)
+        shell: bash
         run: |
           set -euo pipefail
-          REGION=$(awk -F'=' '/^\s*aws_region\s*=/{gsub(/[ "]/,"",$2);print $2}' terraform.tfvars)
-          echo "region=$REGION" >> $GITHUB_OUTPUT
+          PROJECT=$(grep '^project_name' terraform.tfvars | awk -F\" '{print $2}')
+          REGION="us-east-1"
 
-      - name: Terraform init
-        run: terraform init
+          # --- CloudWatch Log Group ---
+          if aws logs describe-log-groups --log-group-name-prefix "/ecs/${PROJECT}" --query 'logGroups[?logGroupName==`/ecs/'"${PROJECT}"'`].logGroupName' --output text | grep -q "/ecs/${PROJECT}"; then
+            echo "Importando Log Group /ecs/${PROJECT} (se não estiver no state)"
+            terraform import -no-color aws_cloudwatch_log_group.ecs "/ecs/${PROJECT}" || true
+          fi
 
-      - name: Terraform validate
-        run: terraform validate
+          # --- IAM roles ---
+          for ROLE in "${PROJECT}-exec-role"; do
+            if aws iam get-role --role-name "$ROLE" >/dev/null 2>&1; then
+              echo "Importando IAM Role ${ROLE} (se não estiver no state)"
+              terraform import -no-color aws_iam_role.task_execution_role "${ROLE}" || true
+              terraform import -no-color aws_iam_role_policy_attachment.exec_policy "${ROLE}/arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy" || true
+            fi
+          done
 
-      - name: Terraform apply
-        run: terraform apply -auto-approve
+          # --- VPC principal ---
+          VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=${PROJECT}-vpc" --query 'Vpcs[0].VpcId' --output text || true)
+          if [ "$VPC_ID" != "None" ] && [ -n "$VPC_ID" ]; then
+            echo "Importando VPC ${VPC_ID}"
+            terraform import -no-color aws_vpc.main "$VPC_ID" || true
+          fi
+
+          # Subnets públicas
+          for AZ in us-east-1a us-east-1b; do
+            NAME="${PROJECT}-public-${AZ}"
+            SUBNET_ID=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=${NAME}" --query 'Subnets[0].SubnetId' --output text || true)
+            if [ "$SUBNET_ID" != "None" ] && [ -n "$SUBNET_ID" ]; then
+              echo "Importando Subnet pública $AZ ($SUBNET_ID)"
+              terraform import -no-color "aws_subnet.public[\"$AZ\"]" "$SUBNET_ID" || true
+            fi
+          done
+
+          # Subnets privadas
+          for AZ in us-east-1a us-east-1b; do
+            NAME="${PROJECT}-private-${AZ}"
+            SUBNET_ID=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=${NAME}" --query 'Subnets[0].SubnetId' --output text || true)
+            if [ "$SUBNET_ID" != "None" ] && [ -n "$SUBNET_ID" ]; then
+              echo "Importando Subnet privada $AZ ($SUBNET_ID)"
+              terraform import -no-color "aws_subnet.private[\"$AZ\"]" "$SUBNET_ID" || true
+            fi
+          done
+
+          # IGW
+          if [ "${VPC_ID:-}" != "" ]; then
+            IGW_ID=$(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=${VPC_ID}" --query 'InternetGateways[0].InternetGatewayId' --output text || true)
+            if [ "$IGW_ID" != "None" ] && [ -n "$IGW_ID" ]; then
+              terraform import -no-color aws_internet_gateway.igw "$IGW_ID" || true
+            fi
+          fi
+
+          # NAT EIP (não temos tag => tentativa branda)
+          EIP_ALLOC=$(aws ec2 describe-addresses --query "Addresses[?Tags[?Key=='Name'&&Value=='${PROJECT}-nat-eip']].AllocationId" --output text || true)
+          if [ "$EIP_ALLOC" != "None" ] && [ -n "$EIP_ALLOC" ]; then
+            terraform import -no-color aws_eip.nat_eip "$EIP_ALLOC" || true
+          fi
+
+          # NAT GW
+          NAT_ID=$(aws ec2 describe-nat-gateways --filter "Name=tag:Name,Values=${PROJECT}-nat" --query 'NatGateways[0].NatGatewayId' --output text || true)
+          if [ "$NAT_ID" != "None" ] && [ -n "$NAT_ID" ]; then
+            terraform import -no-color aws_nat_gateway.nat "$NAT_ID" || true
+          fi
+
+          # Route tables
+          RTB_PUBLIC=$(aws ec2 describe-route-tables --filters "Name=tag:Name,Values=${PROJECT}-public-rt" --query 'RouteTables[0].RouteTableId' --output text || true)
+          if [ "$RTB_PUBLIC" != "None" ] && [ -n "$RTB_PUBLIC" ]; then
+            terraform import -no-color aws_route_table.public "$RTB_PUBLIC" || true
+          fi
+
+          RTB_PRIVATE=$(aws ec2 describe-route-tables --filters "Name=tag:Name,Values=${PROJECT}-private-rt" --query 'RouteTables[0].RouteTableId' --output text || true)
+          if [ "$RTB_PRIVATE" != "None" ] && [ -n "$RTB_PRIVATE" ]; then
+            terraform import -no-color aws_route_table.private "$RTB_PRIVATE" || true
+          fi
+
+          # SGs
+          ECS_SG=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=${PROJECT}-ecs" --query 'SecurityGroups[0].GroupId' --output text || true)
+          if [ "$ECS_SG" != "None" ] && [ -n "$ECS_SG" ]; then
+            terraform import -no-color aws_security_group.ecs_sg "$ECS_SG" || true
+          fi
+
+          EFS_SG=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=${PROJECT}-efs" --query 'SecurityGroups[0].GroupId' --output text || true)
+          if [ "$EFS_SG" != "None" ] && [ -n "$EFS_SG" ]; then
+            terraform import -no-color aws_security_group.efs_sg "$EFS_SG" || true
+          fi
+
+          # EFS
+          EFS_ID=$(aws efs describe-file-systems --query "FileSystems[?Name=='${PROJECT}-logs'].FileSystemId" --output text || true)
+          if [ "$EFS_ID" != "None" ] && [ -n "$EFS_ID" ]; then
+            terraform import -no-color aws_efs_file_system.bot_logs "$EFS_ID" || true
+
+            # mount targets por subnet privada (opcional)
+            for AZ in us-east-1a us-east-1b; do
+              SUBNET_ID=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=${PROJECT}-private-${AZ}" --query 'Subnets[0].SubnetId' --output text || true)
+              if [ "$SUBNET_ID" != "None" ] && [ -n "$SUBNET_ID" ]; then
+                MT_ID=$(aws efs describe-mount-targets --file-system-id "$EFS_ID" --query "MountTargets[?SubnetId=='${SUBNET_ID}'].MountTargetId" --output text || true)
+                if [ "$MT_ID" != "None" ] && [ -n "$MT_ID" ]; then
+                  terraform import -no-color "aws_efs_mount_target.bot_logs_mt[\"${AZ}\"]" "$MT_ID" || true
+                fi
+              fi
+            done
+          fi
+
+          # ECS Cluster
+          if aws ecs describe-clusters --clusters "${PROJECT}-cluster" --query 'clusters[0].status' --output text >/dev/null 2>&1; then
+            ARN=$(aws ecs describe-clusters --clusters "${PROJECT}-cluster" --query 'clusters[0].clusterArn' --output text)
+            terraform import -no-color aws_ecs_cluster.main "$ARN" || true
+          fi
+
+      - name: Terraform Plan
+        run: terraform plan -input=false
+
+      - name: Terraform Apply
+        run: terraform apply -input=false -auto-approve

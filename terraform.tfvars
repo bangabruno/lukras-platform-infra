@@ -1,13 +1,16 @@
-aws_region      = "us-east-1"
-project_name    = "lukras-platform"
+aws_region    = "us-east-1"
+project_name  = "lukras-platform"
+
+# Imagem ARM64 (Fargate)
 container_image = "659528245383.dkr.ecr.us-east-1.amazonaws.com/trader-bot:latest"
 
+# Recursos por bot
 cpu            = 256
 memory         = 512
 container_port = 8080
 
+# Variáveis simples por usuário (NÃO-SECRETS)
 users = {
-  # seu bot
   n8w0lff = {
     USER_WALLET                            = "0x7Be83Fbf23E4a0241BFD1b97F1863D44b661B056"
     LNM_ENABLED                            = "true"
@@ -30,28 +33,10 @@ users = {
     HL_ORDER_TAKE_PROFIT_PERCENT           = "0.006"
     HL_MAX_MARGIN_ALLOCATED_PERCENT        = "0.5"
   }
-
-  # exemplo de novo cliente
+  # Exemplo de outro user:
   # satoshi = {
-  #   USER_WALLET                            = null
-  #   LNM_ENABLED                            = null
-  #   LNM_LEVERAGE                           = null
-  #   LNM_GET_PRICE_EVERY_SECS               = null
-  #   LNM_ORDER_MARGIN_ENTRY_SATS            = null
-  #   LNM_ORDER_MARGIN_ADD_PERCENT           = null
-  #   LNM_ORDER_MARGIN_CHECK_PERCENT         = null
-  #   LNM_ORDER_PRICE_VARIATION_USD          = null
-  #   LNM_ORDER_TAKE_PROFIT_PERCENT          = null
-  #   LNM_ORDER_TOTAL_LIMIT                  = null
-  #   LNM_ORDER_MARGIN_ENTRY_DYNAMIC_ENABLED = null
-  #   LNM_ORDER_PRICE_LIMIT                  = null
-  #   LNM_MULTI_ACCOUNT_ENABLED              = null
-  #   HL_ENABLED                             = null
-  #   HL_LEVERAGE                            = null
-  #   HL_GET_PRICE_EVERY_SECS                = null
-  #   HL_ORDER_MARGIN_ENTRY_USD              = null
-  #   HL_ORDER_PRICE_VARIATION_USD           = null
-  #   HL_ORDER_TAKE_PROFIT_PERCENT           = null
-  #   HL_MAX_MARGIN_ALLOCATED_PERCENT        = null
+  #   USER_WALLET = "null"
+  #   LNM_ENABLED = "true"
+  #   ...
   # }
 }
