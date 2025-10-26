@@ -33,44 +33,48 @@ jobs:
 
       - name: Parse tfvars for users
         id: parse
+        shell: bash
         run: |
           set -euo pipefail
           USERS=$(python3 - <<'PY'
           import re, json
           with open('terraform.tfvars','r') as f:
             s=f.read()
-          m=re.search(r'users\s*=\s*{(.*?)}', s, re.S)
+          # pega o bloco users = { ... }
+            m = re.search(r'users\s*=\s*{(.*)}\s*$', s, re.S|re.M)
           if not m:
-            print("")
-            raise SystemExit
-          block=m.group(1)
-          keys=re.findall(r'(\w+)\s*=', block)
-          print(" ".join(keys))
-          PY
-          )
-          echo "users=${USERS}" >> $GITHUB_OUTPUT
+            print("[]")
+            raise SystemExit(0)
+            block = m.group(1)
+            # pega as chaves no primeiro nível (nomes dos users)
+            keys = re.findall(r'(?m)^\s*([A-Za-z0-9_]+)\s*=', block)
+            print(json.dumps(keys))
+            PY
+            )
+            echo "users=${USERS}" >> "$GITHUB_OUTPUT"
 
       - name: Determine targets
         id: targets
+        shell: bash
         run: |
           set -euo pipefail
           REQ="${{ github.event.inputs.user }}"
-          ALL="${{ steps.parse.outputs.users }}"
-          
+          ALL=$(echo '${{ steps.parse.outputs.users }}' | jq -r '.[]')
           if [ "$REQ" = "all" ]; then
             TARGETS=$(printf "%s\n" $ALL | jq -R . | jq -s .)
           else
             TARGETS=$(printf "%s\n" "$REQ" | jq -R . | jq -s .)
           fi
-          
-          echo "targets=$TARGETS" >> $GITHUB_OUTPUT
+          echo "targets=${TARGETS}" >> "$GITHUB_OUTPUT"
 
       - name: Rollout each target
+        shell: bash
         run: |
           set -euo pipefail
           IMAGE_TAG="${{ github.event.inputs.image_tag }}"
-          PROJECT=$(grep '^project_name' terraform.tfvars | awk -F\" '{print $2}')
-          IMAGE=$(grep '^container_image' terraform.tfvars | awk -F\" '{print $2}')
+          
+          PROJECT=$(grep -E '^project_name' terraform.tfvars | awk -F\" '{print $2}')
+          IMAGE=$(grep -E '^container_image' terraform.tfvars | awk -F\" '{print $2}')
           BASE_IMAGE="${IMAGE%:*}"
           
           for USER in $(echo '${{ steps.targets.outputs.targets }}' | jq -r '.[]'); do
@@ -80,33 +84,49 @@ jobs:
             SERVICE="${PROJECT}-${USER}"
             FAMILY="${PROJECT}-${USER}"
           
-            if ! aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --query 'services[0].serviceName' --output text >/dev/null 2>&1; then
+            # Verifica se o service existe
+            if ! aws ecs describe-services \
+              --cluster "$CLUSTER" \
+              --services "$SERVICE" \
+              --query 'services[0].serviceName' \
+              --output text >/dev/null 2>&1; then
               echo "::error::Service '${SERVICE}' não existe. Execute o workflow 'Infra Apply' para criar o user '${USER}'."
               exit 1
             fi
           
             NEW_IMAGE="${BASE_IMAGE}:${IMAGE_TAG}"
           
-            TD_ARN=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.taskDefinitionArn' --output text)
+            # ContainerDefinitions atuais com a nova imagem
+            CONTAINERS_JSON=$(aws ecs describe-task-definition \
+              --task-definition "$FAMILY" \
+              --query 'taskDefinition.containerDefinitions' \
+              --output json | jq '.[0].image = "'"$NEW_IMAGE"'" | [.]')
           
-            CONTAINERS_JSON=$(aws ecs describe-task-definition --task-definition "$FAMILY" \
-                --query 'taskDefinition.containerDefinitions' \
-                | jq '.[0].image = "'"$NEW_IMAGE"'" | [.]')
+            # Demais atributos da task atual
+            EXEC_ROLE=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.executionRoleArn' --output text)
+            NET_MODE=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.networkMode' --output text)
+            CPU=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.cpu' --output text)
+            MEM=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.memory' --output text)
+            REQS=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.requiresCompatibilities' --output json)
+            RUNTIME=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.runtimePlatform' --output json)
+            VOLUMES=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.volumes' --output json)
           
+            # Registra nova revisão da task definition
             NEW_TD_ARN=$(aws ecs register-task-definition \
               --family "$FAMILY" \
-              --execution-role-arn "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.executionRoleArn' --output text)" \
-              --network-mode "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.networkMode' --output text)" \
-              --requires-compatibilities FARGATE \
-              --cpu "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.cpu' --output text)" \
-              --memory "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.memory' --output text)" \
-              --runtime-platform "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.runtimePlatform' --output json)" \
-              --volumes "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.volumes' --output json)" \
+              --execution-role-arn "$EXEC_ROLE" \
+              --network-mode "$NET_MODE" \
+              --requires-compatibilities "$REQS" \
+              --cpu "$CPU" \
+              --memory "$MEM" \
+              --runtime-platform "$RUNTIME" \
+              --volumes "$VOLUMES" \
               --container-definitions "$CONTAINERS_JSON" \
-              --query 'taskDefinition.taskDefinitionArn' --output text )
+              --query 'taskDefinition.taskDefinitionArn' --output text)
           
             echo "✔ Nova task definition: $NEW_TD_ARN"
           
+            # Atualiza o service para a nova revisão
             aws ecs update-service \
               --cluster "$CLUSTER" \
               --service "$SERVICE" \
