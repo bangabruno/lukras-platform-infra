@@ -42,13 +42,13 @@ jobs:
           with open('terraform.tfvars','r') as f:
             s = f.read()
 
-          m = re.search(r'users\s*=\s*{(.*?)}\s*$', s, re.S|re.M)
+          m = re.search(r'users\s*=\s*{(.*)', s, re.S|re.M)
           if not m:
             print(json.dumps([]))
             raise SystemExit(0)
 
           block = m.group(1)
-          keys = re.findall(r'(?m)^\s*([A-Za-z0-9_]+)\s*=', block)
+          keys = re.findall(r'(?m)^\s*([A-Za-z0-9_]+)\s*=\s*{', block)
           print(json.dumps(keys))
           PY
           )
