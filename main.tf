@@ -41,16 +41,21 @@ variable "users" {
 
 # VPC em uso (NÃO criar outra)
 data "aws_vpc" "main" {
-  id = "vpc-0305525ea1ca6a1e1"
+  #id = "vpc-0305525ea1ca6a1e1"
+  id = "vpc-04bafb351cafaf66b"
 }
 
 # Subnets privadas em uso
-data "aws_subnet" "private_a" { id = "subnet-0c88597264633b0ed" } # 10.0.100.0/24 us-east-1a
-data "aws_subnet" "private_b" { id = "subnet-01133a83253cbdc8d" } # 10.0.101.0/24 us-east-1b
+#data "aws_subnet" "private_a" { id = "subnet-0c88597264633b0ed" } # 10.0.100.0/24 us-east-1a
+#data "aws_subnet" "private_b" { id = "subnet-01133a83253cbdc8d" } # 10.0.101.0/24 us-east-1b
+data "aws_subnet" "private_a" { id = "subnet-06c53b145439031a3" } # 10.0.100.0/24 us-east-1a
+data "aws_subnet" "private_b" { id = "subnet-062a2285292ed20da" } # 10.0.101.0/24 us-east-1b
 
 # (Se um dia for usar ALB, já tem públicas:)
-data "aws_subnet" "public_a"  { id = "subnet-07a2cc0f0b856e6af" } # 10.0.0.0/24   us-east-1a
-data "aws_subnet" "public_b"  { id = "subnet-01c66fa7137b495a8" } # 10.0.1.0/24   us-east-1b
+#data "aws_subnet" "public_a"  { id = "subnet-07a2cc0f0b856e6af" } # 10.0.0.0/24   us-east-1a
+#data "aws_subnet" "public_b"  { id = "subnet-01c66fa7137b495a8" } # 10.0.1.0/24   us-east-1b
+data "aws_subnet" "public_a"  { id = "subnet-0fba36c75cc949407" } # 10.0.0.0/24   us-east-1a
+data "aws_subnet" "public_b"  { id = "subnet-0c646430a91b6d777" } # 10.0.1.0/24   us-east-1b
 
 locals {
   private_subnet_ids = [
@@ -61,7 +66,7 @@ locals {
 
 # Security Group usado pelas tasks Fargate (já existente)
 data "aws_security_group" "ecs_tasks_sg" {
-  id = "sg-0c6468f217e707e46"
+  id = "sg-0b2c40b72a6eebb5b"
 }
 
 # ECS Cluster existente
@@ -76,7 +81,7 @@ data "aws_cloudwatch_log_group" "ecs" {
 
 # EFS existente para logs persistentes dos bots
 data "aws_efs_file_system" "bot_logs" {
-  file_system_id = "fs-0d8e8c64186dbf47b" # lukras-platform-bot-logs
+  file_system_id = "fs-02397a9848be9686c" # lukras-platform-logs
 }
 
 # IAM roles já existentes
