@@ -10,8 +10,8 @@ on:
       image_tag:
         description: "Tag da imagem (default: latest)"
         required: false
-        type: string
         default: "latest"
+        type: string
 
 permissions:
   id-token: write
@@ -67,50 +67,53 @@ if not m:
   run: |
     set -euo pipefail
     IMAGE_TAG="${{ github.event.inputs.image_tag }}"
-    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-    REGION="us-east-1"
-    
     PROJECT=$(grep '^project_name' terraform.tfvars | awk -F\" '{print $2}')
     IMAGE=$(grep '^container_image' terraform.tfvars | awk -F\" '{print $2}')
     BASE_IMAGE="${IMAGE%:*}"
     
     for USER in $(echo '${{ steps.targets.outputs.targets }}' | jq -r '.[]'); do
-      FAMILY="${PROJECT}-${USER}"
-      SERVICE="${PROJECT}-${USER}"
-      CLUSTER="${PROJECT}-cluster"
-    
       echo "==> Deploy para user: ${USER}"
+    
+      CLUSTER="${PROJECT}-cluster"
+      SERVICE="${PROJECT}-${USER}"
+      FAMILY="${PROJECT}-${USER}"
+    
       # Verifica se o service existe
       if ! aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --query 'services[0].serviceName' --output text >/dev/null 2>&1; then
-        echo "::error::Service ${SERVICE} não encontrado. Execute o workflow 'infra-apply' para fazer o onboarding do usuário '${USER}'."
+        echo "::error::Service '${SERVICE}' não existe. Execute o workflow 'Infra Apply' para criar o user '${USER}'."
         exit 1
       fi
     
       NEW_IMAGE="${BASE_IMAGE}:${IMAGE_TAG}"
     
-      # Cria nova revisão da task definition com a mesma config, apenas trocando a imagem
+      # Copia a task definition atual
       TD_ARN=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.taskDefinitionArn' --output text)
     
-      # Gera nova JSON de containerDefinitions trocando somente imagem
+      # Substitui apenas a imagem
       CONTAINERS_JSON=$(aws ecs describe-task-definition --task-definition "$FAMILY" \
-        --query 'taskDefinition.containerDefinitions' | jq '.[0].image = "'"$NEW_IMAGE"'" | [.]')
+          --query 'taskDefinition.containerDefinitions' \
+          | jq '.[0].image = "'"$NEW_IMAGE"'" | [.]')
     
-      # Registra nova revisão (reaproveitando atributos atuais)
+      # Registra nova task definition revision
       NEW_TD_ARN=$(aws ecs register-task-definition \
         --family "$FAMILY" \
         --execution-role-arn "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.executionRoleArn' --output text)" \
         --network-mode "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.networkMode' --output text)" \
-        --requires-compatibilities "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.requiresCompatibilities' --output text)" \
+        --requires-compatibilities FARGATE \
         --cpu "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.cpu' --output text)" \
-        --memory "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.memory' --output text)" \
+        --memory "$(aws ecs.describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.memory' --output text)" \
         --runtime-platform "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.runtimePlatform' --output json)" \
         --volumes "$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.volumes' --output json)" \
         --container-definitions "$CONTAINERS_JSON" \
-        --query 'taskDefinition.taskDefinitionArn' --output text)
+        --query 'taskDefinition.taskDefinitionArn' --output text )
     
-      echo "   Nova task definition: $NEW_TD_ARN"
+      echo "✔ Nova task definition: $NEW_TD_ARN"
     
-      # Atualiza o service para nova revisão
-      aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --task-definition "$NEW_TD_ARN" >/dev/null
-      echo "   Service atualizado: $SERVICE"
+      # Atualiza serviço
+      aws ecs update-service \
+        --cluster "$CLUSTER" \
+        --service "$SERVICE" \
+        --task-definition "$NEW_TD_ARN" >/dev/null
+    
+      echo "✔ Service atualizado: $SERVICE"
     done
