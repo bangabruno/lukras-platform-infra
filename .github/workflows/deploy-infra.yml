@@ -37,10 +37,10 @@ jobs:
           REGION="us-east-1"
 
           # --- CloudWatch Log Group ---
-          if aws logs describe-log-groups --log-group-name-prefix "/ecs/${PROJECT}" --query 'logGroups[?logGroupName==`/ecs/'"${PROJECT}"'`].logGroupName' --output text | grep -q "/ecs/${PROJECT}"; then
+          #if aws logs describe-log-groups --log-group-name-prefix "/ecs/${PROJECT}" --query 'logGroups[?logGroupName==`/ecs/'"${PROJECT}"'`].logGroupName' --output text | grep -q "/ecs/${PROJECT}"; then
             #echo "Importando Log Group /ecs/${PROJECT} (se não estiver no state)"
             #terraform import -no-color aws_cloudwatch_log_group.ecs "/ecs/${PROJECT}" || true
-          fi
+          #fi
 
           # --- IAM roles ---
           for ROLE in "${PROJECT}-exec-role"; do
