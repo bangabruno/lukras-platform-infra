@@ -146,7 +146,7 @@ resource "aws_ecs_task_definition" "bot" {
           name  = k
           value = v
         }
-        if v != null && trim(v) != ""
+        if v != null && trimspace(v) != ""
       ]
 
       # Secrets no padrão "prod/lukras/<user>" — DEVEM existir já
