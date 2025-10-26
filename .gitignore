@@ -33,3 +33,4 @@ terraform.rc
 /.idea/modules.xml
 /.idea/vcs.xml
 /.idea/.gitignore
+/.terraform.lock.hcl
