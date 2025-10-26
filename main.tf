@@ -1,4 +1,6 @@
 
+data "aws_caller_identity" "current" {}
+
 ########################################
 # VPC, Subnets, Routes, SGs
 ########################################
@@ -7,9 +9,7 @@ resource "aws_vpc" "main" {
   enable_dns_support   = true
   enable_dns_hostnames = true
 
-  tags = {
-    Name = "${var.project_name}-vpc"
-  }
+  tags = { Name = "${var.project_name}-vpc" }
 }
 
 resource "aws_subnet" "public" {
@@ -23,9 +23,7 @@ resource "aws_subnet" "public" {
   availability_zone       = each.key
   map_public_ip_on_launch = true
 
-  tags = {
-    Name = "${var.project_name}-public-${each.key}"
-  }
+  tags = { Name = "${var.project_name}-public-${each.key}" }
 }
 
 resource "aws_subnet" "private" {
@@ -39,22 +37,18 @@ resource "aws_subnet" "private" {
   availability_zone       = each.key
   map_public_ip_on_launch = false
 
-  tags = {
-    Name = "${var.project_name}-private-${each.key}"
-  }
+  tags = { Name = "${var.project_name}-private-${each.key}" }
 }
 
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.main.id
+  tags   = { Name = "${var.project_name}-igw" }
 }
 
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.igw.id
-  }
+  route { cidr_block = "0.0.0.0/0" gateway_id = aws_internet_gateway.igw.id }
+  tags = { Name = "${var.project_name}-public-rt" }
 }
 
 resource "aws_route_table_association" "public_assoc" {
@@ -65,21 +59,20 @@ resource "aws_route_table_association" "public_assoc" {
 
 resource "aws_eip" "nat_eip" {
   depends_on = [aws_internet_gateway.igw]
+  tags       = { Name = "${var.project_name}-nat-eip" }
 }
 
 resource "aws_nat_gateway" "nat" {
   allocation_id = aws_eip.nat_eip.id
-  subnet_id     = values(aws_subnet.public)[0].id
+  subnet_id     = tolist(values(aws_subnet.public))[0].id
   depends_on    = [aws_internet_gateway.igw]
+  tags          = { Name = "${var.project_name}-nat" }
 }
 
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.nat.id
-  }
+  route { cidr_block = "0.0.0.0/0" nat_gateway_id = aws_nat_gateway.nat.id }
+  tags = { Name = "${var.project_name}-private-rt" }
 }
 
 resource "aws_route_table_association" "private_assoc" {
@@ -102,6 +95,8 @@ resource "aws_security_group" "ecs_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  tags = { Name = "${var.project_name}-ecs-sg" }
 }
 
 resource "aws_security_group" "efs_sg" {
@@ -123,6 +118,8 @@ resource "aws_security_group" "efs_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  tags = { Name = "${var.project_name}-efs-sg" }
 }
 
 ########################################
@@ -133,8 +130,8 @@ resource "aws_cloudwatch_log_group" "ecs" {
   retention_in_days = 30
 
   lifecycle {
-    ignore_changes = [name]
-    prevent_destroy = false
+    create_before_destroy = false
+    ignore_changes        = [name]
   }
 }
 
@@ -143,10 +140,7 @@ resource "aws_cloudwatch_log_group" "ecs" {
 ########################################
 resource "aws_efs_file_system" "bot_logs" {
   encrypted = true
-
-  tags = {
-    Name = "${var.project_name}-logs"
-  }
+  tags      = { Name = "${var.project_name}-logs" }
 }
 
 resource "aws_efs_mount_target" "bot_logs_mt" {
@@ -158,25 +152,42 @@ resource "aws_efs_mount_target" "bot_logs_mt" {
 }
 
 ########################################
-# ECS Cluster
+# ECS Cluster & IAM
 ########################################
 resource "aws_ecs_cluster" "main" {
   name = "${var.project_name}-cluster"
 }
 
-resource "aws_iam_role" "task_execution_role" {
-  name = "${var.project_name}-exec-role"
-
-  assume_role_policy = jsonencode({
+# Mesma trust policy para os dois roles (ecs-tasks.amazonaws.com)
+locals {
+  ecs_task_trust = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = {
-        Service = "ecs-tasks.amazonaws.com"
-      }
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
     }]
   })
+}
+
+resource "aws_iam_role" "task_execution_role" {
+  name               = "${var.project_name}-exec-role"
+  assume_role_policy = local.ecs_task_trust
+
+  lifecycle {
+    prevent_destroy = false
+    ignore_changes  = [name, assume_role_policy]
+  }
+}
+
+resource "aws_iam_role" "task_role" {
+  name               = "${var.project_name}-task-role"
+  assume_role_policy = local.ecs_task_trust
+
+  lifecycle {
+    prevent_destroy = false
+    ignore_changes  = [name, assume_role_policy]
+  }
 }
 
 resource "aws_iam_role_policy_attachment" "exec_policy" {
@@ -185,7 +196,7 @@ resource "aws_iam_role_policy_attachment" "exec_policy" {
 }
 
 ########################################
-# ECS Services and Task Definitions (1 por user)
+# ECS Task Definitions & Services (1 por user)
 ########################################
 resource "aws_ecs_task_definition" "bot" {
   for_each = var.users
@@ -242,7 +253,7 @@ resource "aws_ecs_task_definition" "bot" {
       }
     ]
 
-    # Secrets referenciadas direto pelo ARN, devem existir manualmente!
+    # Secrets (já devem existir em Secrets Manager)
     secrets = [
       for k in [
         "LNM_KEY", "LNM_SECRET", "LNM_PASSPHRASE",
@@ -256,15 +267,13 @@ resource "aws_ecs_task_definition" "bot" {
   }])
 }
 
-data "aws_caller_identity" "current" {}
-
 resource "aws_ecs_service" "bot" {
-  for_each       = var.users
-  name           = "${var.project_name}-${each.key}"
-  cluster        = aws_ecs_cluster.main.id
+  for_each        = var.users
+  name            = "${var.project_name}-${each.key}"
+  cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.bot[each.key].arn
-  launch_type    = "FARGATE"
-  desired_count  = 1
+  launch_type     = "FARGATE"
+  desired_count   = 1
 
   network_configuration {
     subnets          = [for s in aws_subnet.private : s.id]

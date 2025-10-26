@@ -1,0 +1,72 @@
+name: Infra - One-time Import Existing Resources
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_name:
+        description: "Project name (must match terraform.tfvars)"
+        required: true
+        default: "lukras-platform"
+      aws_region:
+        description: "AWS region"
+        required: true
+        default: "us-east-1"
+
+jobs:
+  import-state:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      TF_IN_AUTOMATION: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ github.event.inputs.aws_region }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      - name: One-time imports (idempotent)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PROJECT_NAME="${{ github.event.inputs.project_name }}"
+          AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          echo "Account: $AWS_ACCOUNT_ID"
+          echo "Project : $PROJECT_NAME"
+
+          import_if_missing () {
+            local addr="$1"
+            local id="$2"
+            if terraform state show "$addr" >/dev/null 2>&1; then
+              echo "✓ Already in state: $addr"
+            else
+              echo "→ Importing $addr = $id"
+              terraform import "$addr" "$id" || true
+            fi
+          }
+
+          # 1) CloudWatch Log Group /ecs/<project_name>
+          import_if_missing 'aws_cloudwatch_log_group.ecs' "/ecs/${PROJECT_NAME}"
+
+          # 2) IAM Roles (names devem bater com main.tf)
+          import_if_missing 'aws_iam_role.task_execution_role' "${PROJECT_NAME}-exec-role"
+          import_if_missing 'aws_iam_role.task_role'           "${PROJECT_NAME}-task-role"
+
+      - name: Terraform Plan (dry-run)
+        run: terraform plan -input=false
