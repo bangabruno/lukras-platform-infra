@@ -74,18 +74,18 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE_TAG="${{ github.event.inputs.image_tag }}"
-          
+
           PROJECT=$(grep -E '^project_name' terraform.tfvars | awk -F\" '{print $2}')
           IMAGE=$(grep -E '^container_image' terraform.tfvars | awk -F\" '{print $2}')
           BASE_IMAGE="${IMAGE%:*}"
-          
+
           for USER in $(echo '${{ steps.targets.outputs.targets }}' | jq -r '.[]'); do
             echo "==> Deploy para user: ${USER}"
-          
+
             CLUSTER="${PROJECT}-cluster"
             SERVICE="${PROJECT}-${USER}"
             FAMILY="${PROJECT}-${USER}"
-          
+
             # Verifica se o service existe
             if ! aws ecs describe-services \
               --cluster "$CLUSTER" \
@@ -95,15 +95,14 @@ jobs:
               echo "::error::Service '${SERVICE}' não existe. Execute o workflow 'Infra Apply' para criar o user '${USER}'."
               exit 1
             fi
-          
+
             NEW_IMAGE="${BASE_IMAGE}:${IMAGE_TAG}"
-          
+
             # ContainerDefinitions atuais com a nova imagem
             CONTAINERS_JSON=$(aws ecs describe-task-definition \
               --task-definition "$FAMILY" \
-              --query 'taskDefinition.containerDefinitions' \
-              --output json | jq '.[0].image = "'"$NEW_IMAGE"'" | [.]')
-          
+              --query 'taskDefinition.containerDefinitions' | jq -c '.[0].image = "'"$NEW_IMAGE"'"')
+
             # Demais atributos da task atual
             EXEC_ROLE=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.executionRoleArn' --output text)
             NET_MODE=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.networkMode' --output text)
@@ -112,27 +111,27 @@ jobs:
             REQS=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.requiresCompatibilities' --output json)
             RUNTIME=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.runtimePlatform' --output json)
             VOLUMES=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.volumes' --output json)
-          
+
             # Registra nova revisão da task definition
             NEW_TD_ARN=$(aws ecs register-task-definition \
               --family "$FAMILY" \
               --execution-role-arn "$EXEC_ROLE" \
               --network-mode "$NET_MODE" \
-              --requires-compatibilities "$REQS" \
+              --requires-compatibilities $(echo "$REQS" | jq -r '.[]') \
               --cpu "$CPU" \
               --memory "$MEM" \
               --runtime-platform "$RUNTIME" \
               --volumes "$VOLUMES" \
               --container-definitions "$CONTAINERS_JSON" \
               --query 'taskDefinition.taskDefinitionArn' --output text)
-          
+
             echo "✔ Nova task definition: $NEW_TD_ARN"
-          
+
             # Atualiza o service para a nova revisão
             aws ecs update-service \
               --cluster "$CLUSTER" \
               --service "$SERVICE" \
               --task-definition "$NEW_TD_ARN" >/dev/null
-          
+
             echo "✔ Service atualizado: $SERVICE"
           done
