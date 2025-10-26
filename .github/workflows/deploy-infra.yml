@@ -24,7 +24,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ steps.region.outputs.region }}
+          aws-region: us-east-1
 
       - name: Read region from terraform.tfvars
         id: region
