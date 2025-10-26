@@ -41,11 +41,11 @@ jobs:
             s=f.read()
           m=re.search(r'users\s*=\s*{(.*?)}', s, re.S)
           if not m:
-            print(json.dumps([]))
+            print("")
             raise SystemExit
           block=m.group(1)
           keys=re.findall(r'(\w+)\s*=', block)
-          print(json.dumps(keys))
+          print(" ".join(keys))
           PY
           )
           echo "users=${USERS}" >> $GITHUB_OUTPUT
@@ -55,13 +55,15 @@ jobs:
         run: |
           set -euo pipefail
           REQ="${{ github.event.inputs.user }}"
-          ALL=$(echo '${{ steps.parse.outputs.users }}' | jq -r '.[]')
+          ALL="${{ steps.parse.outputs.users }}"
+          
           if [ "$REQ" = "all" ]; then
             TARGETS=$(printf "%s\n" $ALL | jq -R . | jq -s .)
           else
             TARGETS=$(printf "%s\n" "$REQ" | jq -R . | jq -s .)
           fi
-          echo "targets=${TARGETS}" >> $GITHUB_OUTPUT
+          
+          echo "targets=$TARGETS" >> $GITHUB_OUTPUT
 
       - name: Rollout each target
         run: |
