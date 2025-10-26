@@ -37,21 +37,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          USERS=$(python3 - <<'PY'
-          import re, json
-          with open('terraform.tfvars','r') as f:
-            s = f.read()
-
-          m = re.search(r'users\s*=\s*{(.*)', s, re.S|re.M)
-          if not m:
-            print(json.dumps([]))
-            raise SystemExit(0)
-
-          block = m.group(1)
-          keys = re.findall(r'(?m)^\s*([A-Za-z0-9_]+)\s*=\s*{', block)
-          print(json.dumps(keys))
-          PY
-          )
+          USERS=$(grep -A 999 'users = {' terraform.tfvars | \
+                  grep -E '^\s{2}[a-zA-Z0-9_]+\s*=\s*\{' | \
+                  sed -E 's/^\s+([a-zA-Z0-9_]+).*/\1/' | \
+                  jq -R . | jq -s -c .)
 
           echo "users=${USERS}" >> $GITHUB_OUTPUT
 
