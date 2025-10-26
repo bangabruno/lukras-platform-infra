@@ -11,6 +11,7 @@ variable "project_name" {
 variable "enable_alb" {
   description = "Habilitar ALB (não usado nos bots sem endpoint)"
   type        = bool
+  default     = false
 }
 
 variable "container_image" {

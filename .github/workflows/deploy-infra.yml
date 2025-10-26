@@ -37,9 +37,8 @@ jobs:
 
       - name: Terraform Plan
         working-directory: ./
-        run: terraform plan -no-color
+        run: terraform plan -no-color -var-file="terraform.tfvars"
 
       - name: Terraform Apply
-        if: github.event.inputs.auto_approve != 'false'
         working-directory: ./
-        run: terraform apply -no-color -auto-approve
+        run: terraform apply -no-color -auto-approve -var-file="terraform.tfvars"
