@@ -63,9 +63,9 @@ jobs:
           REQ="${{ github.event.inputs.user }}"
           ALL=$(echo '${{ steps.parse.outputs.users }}' | jq -r '.[]')
           if [ "$REQ" = "all" ]; then
-            TARGETS=$(printf "%s\n" $ALL | jq -R . | jq -s .)
+            TARGETS=$(printf "%s\n" $ALL | jq -R . | jq -s -c .)
           else
-            TARGETS=$(printf "%s\n" "$REQ" | jq -R . | jq -s .)
+            TARGETS=$(printf "%s\n" "$REQ" | jq -R . | jq -s -c .)
           fi
           echo "targets=${TARGETS}" >> "$GITHUB_OUTPUT"
 
