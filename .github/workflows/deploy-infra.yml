@@ -32,14 +32,14 @@ jobs:
           terraform_version: 1.7.5
 
       - name: Terraform Init
-        working-directory: infra
+        working-directory: ./
         run: terraform init -no-color
 
       - name: Terraform Plan
-        working-directory: infra
+        working-directory: ./
         run: terraform plan -no-color
 
       - name: Terraform Apply
         if: github.event.inputs.auto_approve != 'false'
-        working-directory: infra
+        working-directory: ./
         run: terraform apply -no-color -auto-approve
