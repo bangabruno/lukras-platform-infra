@@ -133,10 +133,8 @@ resource "aws_cloudwatch_log_group" "ecs" {
   retention_in_days = 30
 
   lifecycle {
-    ignore_changes = [
-      name,
-      retention_in_days
-    ]
+    ignore_changes = [name]
+    prevent_destroy = false
   }
 }
 
