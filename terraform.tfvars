@@ -45,6 +45,37 @@ users = {
       "HL_PRIVATE_KEY"
     ]
   }
+  hpk1991 = {
+    env = {
+      USER_WALLET                            = "0x30023e2E1d7d774ECA34AC5b6bD4Ca9225f61DBB"
+      LNM_ENABLED                            = "true"
+      LNM_LEVERAGE                           = "5"
+      LNM_GET_PRICE_EVERY_SECS               = "3"
+      LNM_ORDER_MARGIN_ENTRY_SATS            = "333333"
+      LNM_ORDER_MARGIN_ADD_PERCENT           = "0.1"
+      LNM_ORDER_MARGIN_CHECK_PERCENT         = "0.05"
+      LNM_ORDER_PRICE_VARIATION_USD          = "150"
+      LNM_ORDER_TAKE_PROFIT_PERCENT          = "0.006"
+      LNM_ORDER_TOTAL_LIMIT                  = "100"
+      LNM_ORDER_MARGIN_ENTRY_DYNAMIC_ENABLED = "true"
+      LNM_ORDER_PRICE_LIMIT                  = "123000"
+      LNM_MULTI_ACCOUNT_ENABLED              = "false"
+
+      HL_ENABLED                             = "true"
+      HL_LEVERAGE                            = "10"
+      HL_GET_PRICE_EVERY_SECS                = "3"
+      HL_ORDER_MARGIN_ENTRY_USD              = "100"
+      HL_ORDER_PRICE_VARIATION_USD           = "100"
+      HL_ORDER_TAKE_PROFIT_PERCENT           = "0.006"
+      HL_MAX_MARGIN_ALLOCATED_PERCENT        = "0.5"
+    }
+    secrets = [
+      "LNM_KEY",
+      "LNM_SECRET",
+      "LNM_PASSPHRASE",
+      "HL_PRIVATE_KEY"
+    ]
+  }
 
   # Exemplo de user com apenas 1 conta LNM:
   # satoshi = {
