@@ -148,7 +148,6 @@ resource "aws_ecs_task_definition" "bot" {
         }
       }
 
-      # ENV simples por usuário
       environment = concat(
         [
           {
@@ -160,12 +159,10 @@ resource "aws_ecs_task_definition" "bot" {
           for k, v in each.value.env : {
           name  = k
           value = v
-        }
-          if v != null && trimspace(v) != ""
+        } if v != null && trimspace(v) != ""
         ]
       )
 
-      # Secrets dinâmicos por usuário
       secrets = [
         for secret_name in each.value.secrets : {
           name      = secret_name
@@ -177,12 +174,7 @@ resource "aws_ecs_task_definition" "bot" {
 
   lifecycle {
     create_before_destroy = true
-    ignore_changes = [
-      revision,
-      status,
-    ]
   }
-
 }
 
 ########################################
