@@ -46,11 +46,7 @@ data "aws_vpc" "main" {
   id = "vpc-04bafb351cafaf66b"
 }
 
-# Subnets privadas (não usadas mais, mas mantidas como referência)
-data "aws_subnet" "private_a" { id = "subnet-06c53b145439031a3" } # 10.0.100.0/24 us-east-1a
-data "aws_subnet" "private_b" { id = "subnet-062a2285292ed20da" } # 10.0.101.0/24 us-east-1b
-
-# Subnets públicas (AGORA EM USO)
+# Subnets públicas (EM USO - bots com IP público via Internet Gateway)
 data "aws_subnet" "public_a"  { id = "subnet-0fba36c75cc949407" } # 10.0.0.0/24   us-east-1a
 data "aws_subnet" "public_b"  { id = "subnet-0c646430a91b6d777" } # 10.0.1.0/24   us-east-1b
 
@@ -89,7 +85,7 @@ data "aws_iam_role" "task_role" {
 # Security Group NOVO - Otimizado para bots
 ########################################
 resource "aws_security_group" "bot_tasks" {
-  name_prefix = "${var.project_name}-bot-"
+  name        = "${var.project_name}-bot-tasks-sg"
   description = "Security group para tasks ECS dos bots - SOMENTE EGRESS"
   vpc_id      = data.aws_vpc.main.id
 
