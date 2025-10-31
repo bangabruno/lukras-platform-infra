@@ -18,7 +18,7 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 
 ########################################
-# Variáveis
+# Variables
 ########################################
 variable "aws_region"     { type = string }
 variable "project_name"   { type = string }
@@ -30,7 +30,7 @@ variable "container_port" { type = number }
 
 # users = { "n8w0lff" = { env = {...}, secrets = [...] } }
 variable "users" {
-  description = "Mapa de usuários com variáveis de ambiente e secrets."
+  description = "Map of users with environment variables and secrets"
   type = map(object({
     env     = map(string)
     secrets = list(string)
@@ -38,15 +38,15 @@ variable "users" {
 }
 
 ########################################
-# Infra EXISTENTE (somente data sources)
+# Existing Infrastructure (data sources only)
 ########################################
 
-# VPC em uso
+# VPC in use - do not create another one
 data "aws_vpc" "main" {
   id = "vpc-04bafb351cafaf66b"
 }
 
-# Subnets públicas (EM USO - bots com IP público via Internet Gateway)
+# Public subnets - NOW IN USE for bots with public IP via Internet Gateway
 data "aws_subnet" "public_a"  { id = "subnet-0fba36c75cc949407" } # 10.0.0.0/24   us-east-1a
 data "aws_subnet" "public_b"  { id = "subnet-0c646430a91b6d777" } # 10.0.1.0/24   us-east-1b
 
@@ -57,22 +57,22 @@ locals {
   ]
 }
 
-# ECS Cluster existente
+# Existing ECS Cluster
 data "aws_ecs_cluster" "main" {
   cluster_name = "${var.project_name}-cluster"
 }
 
-# Log group existente
+# Existing CloudWatch log group for ECS logs
 data "aws_cloudwatch_log_group" "ecs" {
   name = "/ecs/${var.project_name}"
 }
 
-# EFS existente
+# Existing EFS for persistent bot logs
 data "aws_efs_file_system" "bot_logs" {
   file_system_id = "fs-02397a9848be9686c"
 }
 
-# IAM roles existentes
+# Existing IAM roles
 data "aws_iam_role" "task_execution_role" {
   name = "${var.project_name}-exec-role"
 }
@@ -82,39 +82,37 @@ data "aws_iam_role" "task_role" {
 }
 
 ########################################
-# Security Group NOVO - Otimizado para bots
+# NEW Security Group - Optimized for bots
 ########################################
 resource "aws_security_group" "bot_tasks" {
   name        = "${var.project_name}-bot-tasks-sg"
-  description = "Security group para tasks ECS dos bots - SOMENTE EGRESS"
+  description = "Security group for ECS bot tasks - EGRESS ONLY"
   vpc_id      = data.aws_vpc.main.id
 
-  # EGRESS: Permitir HTTPS para APIs externas
+  # EGRESS: Allow HTTPS for external APIs
   egress {
-    description = "HTTPS para APIs externas"
+    description = "HTTPS for external APIs"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-
-
-  # EGRESS: Comunicação com EFS (NFS) na VPC
+  # EGRESS: Communication with EFS NFS within VPC
   egress {
-    description = "NFS para EFS (logs persistentes)"
+    description = "NFS for EFS - persistent logs"
     from_port   = 2049
     to_port     = 2049
     protocol    = "tcp"
     cidr_blocks = [data.aws_vpc.main.cidr_block]
   }
 
-  # INGRESS: NENHUMA regra externa!
-  # Bots NÃO recebem requisições da internet
+  # INGRESS: NO external rules!
+  # Bots do NOT receive requests from the internet
 
-  # INGRESS: Apenas comunicação interna na VPC (se necessário entre tasks)
+  # INGRESS: Only internal VPC communication if needed between tasks
   ingress {
-    description = "Tráfego interno VPC (entre tasks, se necessário)"
+    description = "Internal VPC traffic between tasks"
     from_port   = 0
     to_port     = 65535
     protocol    = "tcp"
@@ -126,14 +124,10 @@ resource "aws_security_group" "bot_tasks" {
     Environment = "production"
     ManagedBy   = "Terraform"
   }
-
-  lifecycle {
-    create_before_destroy = true
-  }
 }
 
 ########################################
-# ECS Task Definition (1 por user)
+# ECS Task Definition (1 per user)
 ########################################
 resource "aws_ecs_task_definition" "bot" {
   for_each = var.users
@@ -216,7 +210,7 @@ resource "aws_ecs_task_definition" "bot" {
 }
 
 ########################################
-# ECS Service (1 por user) - Subnet PÚBLICA
+# ECS Service (1 per user) - PUBLIC subnet
 ########################################
 resource "aws_ecs_service" "bot" {
   for_each = var.users
@@ -231,8 +225,8 @@ resource "aws_ecs_service" "bot" {
 
   network_configuration {
     subnets          = local.public_subnet_ids
-    security_groups  = [aws_security_group.bot_tasks.id]  # SG NOVO otimizado
-    assign_public_ip = true                                # IP público para acesso direto à internet
+    security_groups  = [aws_security_group.bot_tasks.id]  # NEW optimized SG
+    assign_public_ip = true                                # Public IP for direct internet access
   }
 
   deployment_minimum_healthy_percent = 100
@@ -256,18 +250,18 @@ resource "aws_ecs_service" "bot" {
 # Outputs
 ########################################
 output "security_group_id" {
-  description = "ID do Security Group dos bots (sem ingress externo)"
+  description = "ID of the bot Security Group - no external ingress"
   value       = aws_security_group.bot_tasks.id
 }
 
 output "bot_services" {
-  description = "Serviços ECS criados"
+  description = "ECS services created"
   value = {
     for k, svc in aws_ecs_service.bot :
     k => {
       name    = svc.name
       cluster = svc.cluster
-      status  = "Running em subnet PÚBLICA com IP público (via Internet Gateway)"
+      status  = "Running in PUBLIC subnet with public IP via Internet Gateway"
     }
   }
 }
