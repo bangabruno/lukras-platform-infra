@@ -82,6 +82,56 @@ data "aws_iam_role" "task_role" {
 }
 
 ########################################
+# IAM Policy for EFS access
+########################################
+
+# Policy document for EFS access
+data "aws_iam_policy_document" "efs_access" {
+  statement {
+    sid    = "AllowEFSAccess"
+    effect = "Allow"
+    actions = [
+      "elasticfilesystem:ClientMount",
+      "elasticfilesystem:ClientWrite",
+      "elasticfilesystem:DescribeFileSystems",
+      "elasticfilesystem:DescribeMountTargets"
+    ]
+    resources = [
+      data.aws_efs_file_system.bot_logs.arn
+    ]
+  }
+}
+
+# Create inline policy for EFS access
+resource "aws_iam_role_policy" "task_role_efs" {
+  name   = "${var.project_name}-task-efs-access"
+  role   = data.aws_iam_role.task_role.name
+  policy = data.aws_iam_policy_document.efs_access.json
+}
+
+# Policy for ECS Exec (enable_execute_command)
+data "aws_iam_policy_document" "ecs_exec" {
+  statement {
+    sid    = "AllowECSExec"
+    effect = "Allow"
+    actions = [
+      "ssmmessages:CreateControlChannel",
+      "ssmmessages:CreateDataChannel",
+      "ssmmessages:OpenControlChannel",
+      "ssmmessages:OpenDataChannel"
+    ]
+    resources = ["*"]
+  }
+}
+
+# Create inline policy for ECS Exec
+resource "aws_iam_role_policy" "task_role_ecs_exec" {
+  name   = "${var.project_name}-task-ecs-exec"
+  role   = data.aws_iam_role.task_role.name
+  policy = data.aws_iam_policy_document.ecs_exec.json
+}
+
+########################################
 # NEW Security Group - Optimized for bots
 ########################################
 resource "aws_security_group" "bot_tasks" {
