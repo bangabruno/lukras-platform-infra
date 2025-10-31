@@ -188,8 +188,7 @@ resource "aws_ecs_task_definition" "bot" {
   cpu                      = tostring(var.cpu)
   memory                   = tostring(var.memory)
   execution_role_arn       = data.aws_iam_role.task_execution_role.arn
-  # task_role_arn removed temporarily for testing
-  # task_role_arn            = data.aws_iam_role.task_role.arn
+  task_role_arn            = data.aws_iam_role.task_role.arn
 
   runtime_platform {
     cpu_architecture        = "ARM64"
