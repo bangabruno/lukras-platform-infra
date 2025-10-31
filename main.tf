@@ -177,7 +177,10 @@ resource "aws_ecs_task_definition" "bot" {
 
   lifecycle {
     create_before_destroy = true
+    ignore_changes        = []
+    replace_triggered_by  = [data.aws_iam_role.task_role.arn]
   }
+
 }
 
 ########################################
