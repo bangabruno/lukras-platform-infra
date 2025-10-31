@@ -39,61 +39,101 @@ variable "users" {
 
 ########################################
 # Infra EXISTENTE (somente data sources)
-# (IDs confirmados por você)
 ########################################
 
-# VPC em uso (NÃO criar outra)
+# VPC em uso
 data "aws_vpc" "main" {
   id = "vpc-04bafb351cafaf66b"
 }
 
-# Subnets privadas em uso
+# Subnets privadas (não usadas mais, mas mantidas como referência)
 data "aws_subnet" "private_a" { id = "subnet-06c53b145439031a3" } # 10.0.100.0/24 us-east-1a
 data "aws_subnet" "private_b" { id = "subnet-062a2285292ed20da" } # 10.0.101.0/24 us-east-1b
 
-# (Se um dia for usar ALB, já tem públicas:)
+# Subnets públicas (AGORA EM USO)
 data "aws_subnet" "public_a"  { id = "subnet-0fba36c75cc949407" } # 10.0.0.0/24   us-east-1a
 data "aws_subnet" "public_b"  { id = "subnet-0c646430a91b6d777" } # 10.0.1.0/24   us-east-1b
 
 locals {
-  private_subnet_ids = [
-    data.aws_subnet.private_a.id,
-    data.aws_subnet.private_b.id,
-  ]
-
   public_subnet_ids = [
     data.aws_subnet.public_a.id,
     data.aws_subnet.public_b.id,
   ]
 }
 
-# Security Group usado pelas tasks Fargate (já existente)
-data "aws_security_group" "ecs_tasks_sg" {
-  id = "sg-0b2c40b72a6eebb5b"
-}
-
 # ECS Cluster existente
 data "aws_ecs_cluster" "main" {
-  cluster_name = "${var.project_name}-cluster" # lukras-platform-cluster
+  cluster_name = "${var.project_name}-cluster"
 }
 
-# Log group existente para ecs logs
+# Log group existente
 data "aws_cloudwatch_log_group" "ecs" {
-  name = "/ecs/${var.project_name}" # /ecs/lukras-platform
+  name = "/ecs/${var.project_name}"
 }
 
-# EFS existente para logs persistentes dos bots
+# EFS existente
 data "aws_efs_file_system" "bot_logs" {
-  file_system_id = "fs-02397a9848be9686c" # lukras-platform-logs
+  file_system_id = "fs-02397a9848be9686c"
 }
 
-# IAM roles já existentes
+# IAM roles existentes
 data "aws_iam_role" "task_execution_role" {
-  name = "${var.project_name}-exec-role"         # lukras-platform-exec-role
+  name = "${var.project_name}-exec-role"
 }
 
 data "aws_iam_role" "task_role" {
-  name = "${var.project_name}-task-role"         # lukras-platform-task-role
+  name = "${var.project_name}-task-role"
+}
+
+########################################
+# Security Group NOVO - Otimizado para bots
+########################################
+resource "aws_security_group" "bot_tasks" {
+  name_prefix = "${var.project_name}-bot-"
+  description = "Security group para tasks ECS dos bots - SOMENTE EGRESS"
+  vpc_id      = data.aws_vpc.main.id
+
+  # EGRESS: Permitir HTTPS para APIs externas
+  egress {
+    description = "HTTPS para APIs externas"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+
+
+  # EGRESS: Comunicação com EFS (NFS) na VPC
+  egress {
+    description = "NFS para EFS (logs persistentes)"
+    from_port   = 2049
+    to_port     = 2049
+    protocol    = "tcp"
+    cidr_blocks = [data.aws_vpc.main.cidr_block]
+  }
+
+  # INGRESS: NENHUMA regra externa!
+  # Bots NÃO recebem requisições da internet
+
+  # INGRESS: Apenas comunicação interna na VPC (se necessário entre tasks)
+  ingress {
+    description = "Tráfego interno VPC (entre tasks, se necessário)"
+    from_port   = 0
+    to_port     = 65535
+    protocol    = "tcp"
+    self        = true
+  }
+
+  tags = {
+    Name        = "${var.project_name}-bot-tasks-sg"
+    Environment = "production"
+    ManagedBy   = "Terraform"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 ########################################
@@ -132,11 +172,13 @@ resource "aws_ecs_task_definition" "bot" {
       portMappings = [{
         containerPort = var.container_port
         hostPort      = var.container_port
+        protocol      = "tcp"
       }]
 
       mountPoints = [{
         sourceVolume  = "logs"
         containerPath = "/app/logs"
+        readOnly      = false
       }]
 
       logConfiguration = {
@@ -178,22 +220,27 @@ resource "aws_ecs_task_definition" "bot" {
 }
 
 ########################################
-# ECS Service (1 por user, sem ALB)
+# ECS Service (1 por user) - Subnet PÚBLICA
 ########################################
 resource "aws_ecs_service" "bot" {
-  for_each       = var.users
-  name           = "${var.project_name}-${each.key}"
-  cluster        = data.aws_ecs_cluster.main.arn
+  for_each = var.users
+
+  name            = "${var.project_name}-${each.key}"
+  cluster         = data.aws_ecs_cluster.main.arn
   task_definition = aws_ecs_task_definition.bot[each.key].arn
-  launch_type    = "FARGATE"
-  desired_count  = 1
+  launch_type     = "FARGATE"
+  desired_count   = 1
+
   enable_execute_command = true
 
   network_configuration {
     subnets          = local.public_subnet_ids
-    security_groups  = [data.aws_security_group.ecs_tasks_sg.id]
-    assign_public_ip = true
+    security_groups  = [aws_security_group.bot_tasks.id]  # SG NOVO otimizado
+    assign_public_ip = true                                # IP público para acesso direto à internet
   }
+
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
 
   lifecycle {
     ignore_changes = [
@@ -202,6 +249,29 @@ resource "aws_ecs_service" "bot" {
     ]
   }
 
-  deployment_minimum_healthy_percent = 100
-  deployment_maximum_percent         = 200
+  tags = {
+    User        = each.key
+    Environment = "production"
+    ManagedBy   = "Terraform"
+  }
+}
+
+########################################
+# Outputs
+########################################
+output "security_group_id" {
+  description = "ID do Security Group dos bots (sem ingress externo)"
+  value       = aws_security_group.bot_tasks.id
+}
+
+output "bot_services" {
+  description = "Serviços ECS criados"
+  value = {
+    for k, svc in aws_ecs_service.bot :
+    k => {
+      name    = svc.name
+      cluster = svc.cluster
+      status  = "Running em subnet PÚBLICA com IP público (via Internet Gateway)"
+    }
+  }
 }
