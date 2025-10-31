@@ -257,6 +257,11 @@ resource "aws_ecs_task_definition" "bot" {
   lifecycle {
     create_before_destroy = true
   }
+
+  depends_on = [
+    aws_iam_role_policy.task_role_efs,
+    aws_iam_role_policy.task_role_ecs_exec
+  ]
 }
 
 ########################################
