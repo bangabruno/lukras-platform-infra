@@ -60,6 +60,11 @@ locals {
     data.aws_subnet.private_a.id,
     data.aws_subnet.private_b.id,
   ]
+
+  public_subnet_ids = [
+    data.aws_subnet.public_a.id,
+    data.aws_subnet.public_b.id,
+  ]
 }
 
 # Security Group usado pelas tasks Fargate (já existente)
@@ -185,14 +190,14 @@ resource "aws_ecs_service" "bot" {
   task_definition = aws_ecs_task_definition.bot[each.key].arn
   launch_type    = "FARGATE"
   desired_count  = 1
+  enable_execute_command = true
 
   network_configuration {
-    subnets          = local.private_subnet_ids
+    subnets          = local.public_subnet_ids
     security_groups  = [data.aws_security_group.ecs_tasks_sg.id]
-    assign_public_ip = false
+    assign_public_ip = true
   }
 
-  # Permite que o deploy-bot force novos deployments sem drift chato
   lifecycle {
     ignore_changes = [
       desired_count,
