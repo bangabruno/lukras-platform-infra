@@ -93,13 +93,13 @@ resource "aws_cloudwatch_metric_alarm" "ecs_task_failure" {
 
   dimensions = {
     ClusterName = var.ecs_cluster_name
-    ServiceName = var.ecs_service_name
   }
 
   alarm_actions = [aws_sns_topic.ecs_failure_topic.arn]
 
   treat_missing_data = "notBreaching"
 }
+
 
 # ======================================
 # EventBridge Rule - ECS Task Failures
