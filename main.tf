@@ -27,8 +27,6 @@ variable "container_image"    { type = string }
 variable "cpu"                { type = number }
 variable "memory"             { type = number }
 variable "container_port"     { type = number }
-variable "ecs_cluster_name"   { type = string }
-variable "ecs_service_name"   { type = string }
 variable "telegram_chat_id"   { type = string }
 
 variable "telegram_bot_token" {
