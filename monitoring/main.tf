@@ -89,12 +89,12 @@ resource "aws_cloudwatch_metric_alarm" "ecs_service_running_tasks" {
   for_each = toset(var.ecs_services)
 
   alarm_name          = "ecs-service-task-failure-${each.key}"
-  alarm_description   = "Triggers when ECS service has 0 running tasks."
+  alarm_description   = "Triggers when ECS service has 0 running tasks for 2 minutes."
   namespace           = "AWS/ECS"
   metric_name         = "RunningTaskCount"
   statistic           = "Average"
   period              = 60
-  evaluation_periods  = 1
+  evaluation_periods  = 2 # must fail 2 consecutive minutes
   threshold           = 1
   comparison_operator = "LessThanThreshold"
 
@@ -104,7 +104,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_service_running_tasks" {
   }
 
   alarm_actions      = [aws_sns_topic.ecs_failure_topic.arn]
-  treat_missing_data = "breaching"
+  treat_missing_data = "notBreaching"
 }
 
 # ======================================
