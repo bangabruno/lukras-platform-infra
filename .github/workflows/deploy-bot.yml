@@ -104,11 +104,11 @@ jobs:
             RUNTIME=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.runtimePlatform' --output json)
             VOLUMES=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.volumes' --output json)
           
-            if [ "$TASK_ROLE" = "None" ] || [ -z "$TASK_ROLE" ]; then
+            # Corrige caso o AWS CLI retorne None ou role inválida
+            if [[ "$TASK_ROLE" == *":role/None" ]] || [ -z "$TASK_ROLE" ]; then
               TASK_ROLE="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${PROJECT}-task-role"
-              echo "⚠️ TaskRoleArn ausente — usando padrão: $TASK_ROLE"
+              echo "⚠️ TaskRoleArn ausente ou inválido — usando padrão: $TASK_ROLE"
             fi
-  
   
             # Registra nova revisão da task definition
             NEW_TD_ARN=$(aws ecs register-task-definition \
