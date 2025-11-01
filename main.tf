@@ -52,7 +52,7 @@ variable "users" {
 module "monitoring" {
   source             = "./monitoring"
   aws_region         = var.aws_region
-  ecs_cluster_name   = var.ecs_cluster_name
+  ecs_cluster_name   = "${var.project_name}-cluster"
   telegram_bot_token = var.telegram_bot_token
   telegram_chat_id   = var.telegram_chat_id
 }
