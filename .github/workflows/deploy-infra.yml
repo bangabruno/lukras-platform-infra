@@ -10,8 +10,6 @@ permissions:
 env:
   TF_IN_AUTOMATION: "true"
   AWS_REGION: "us-east-1"
-  TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-  TF_VAR_telegram_chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
 
 jobs:
   terraform-apply:
@@ -37,11 +35,20 @@ jobs:
       - name: Terraform Init
         working-directory: ./
         run: terraform init -no-color
+        env:
+          TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TF_VAR_telegram_chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
 
       - name: Terraform Plan
         working-directory: ./
         run: terraform plan -no-color -var-file="terraform.tfvars"
+        env:
+          TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TF_VAR_telegram_chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
 
       - name: Terraform Apply
         working-directory: ./
         run: terraform apply -no-color -auto-approve -var-file="terraform.tfvars"
+        env:
+          TF_VAR_telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TF_VAR_telegram_chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
