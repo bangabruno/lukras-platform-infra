@@ -17,6 +17,7 @@ jobs:
   terraform-apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
+    environment: prod
 
     steps:
       - name: Checkout repository
