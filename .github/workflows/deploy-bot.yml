@@ -119,11 +119,13 @@ jobs:
           
             echo "✔ Nova task definition: $NEW_TD_ARN"
 
-            # Atualiza o service para a nova revisão
-            aws ecs update-service \
-              --cluster "$CLUSTER" \
-              --service "$SERVICE" \
-              --task-definition "$NEW_TD_ARN" >/dev/null
+          # Atualiza o service para a nova revisão e força o restart
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --task-definition "$NEW_TD_ARN" \
+            --force-new-deployment >/dev/null
+          
+          echo "✔ Service atualizado e forçado novo deploy: $SERVICE"
 
-            echo "✔ Service atualizado: $SERVICE"
           done
