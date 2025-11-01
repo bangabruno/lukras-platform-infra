@@ -53,8 +53,8 @@ module "monitoring" {
   ecs_cluster_name   = "${var.project_name}-cluster"
   telegram_bot_token = var.telegram_bot_token
   telegram_chat_id   = var.telegram_chat_id
+  ecs_services       = [for svc in aws_ecs_service.bot : svc.name]
 }
-
 
 ########################################
 # Existing Infrastructure (data sources only)

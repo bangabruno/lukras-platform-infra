@@ -35,3 +35,4 @@ terraform.rc
 /.idea/.gitignore
 /.terraform.lock.hcl
 /.idea/terraform.xml
+/monitoring/lambda/function.zip
