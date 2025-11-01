@@ -128,4 +128,4 @@ jobs:
           
           echo "✔ Service atualizado e forçado novo deploy: $SERVICE"
 
-  done
+          done
