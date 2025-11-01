@@ -91,6 +91,8 @@ jobs:
             CONTAINERS_JSON=$(aws ecs describe-task-definition \
               --task-definition "$FAMILY" \
               --query 'taskDefinition.containerDefinitions' | jq -c '.[0].image = "'"$NEW_IMAGE"'"')
+          
+            AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
 
             # Demais atributos da task atual
             EXEC_ROLE=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.executionRoleArn' --output text)
@@ -101,7 +103,13 @@ jobs:
             REQS=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.requiresCompatibilities' --output json)
             RUNTIME=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.runtimePlatform' --output json)
             VOLUMES=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.volumes' --output json)
-            
+          
+            if [ "$TASK_ROLE" = "None" ] || [ -z "$TASK_ROLE" ]; then
+              TASK_ROLE="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${PROJECT}-task-role"
+              echo "⚠️ TaskRoleArn ausente — usando padrão: $TASK_ROLE"
+            fi
+  
+  
             # Registra nova revisão da task definition
             NEW_TD_ARN=$(aws ecs register-task-definition \
               --family "$FAMILY" \
