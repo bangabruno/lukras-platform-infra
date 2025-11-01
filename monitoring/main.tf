@@ -78,9 +78,10 @@ resource "aws_sns_topic_subscription" "lambda_sub" {
 }
 
 # ======================================
-# CloudWatch Alarm - running tasks below desired
+# CloudWatch Alarm - cluster-level task health
 # ======================================
 resource "aws_cloudwatch_metric_alarm" "ecs_task_failure" {
+  count               = var.enable_cluster_alarm ? 1 : 0
   alarm_name          = "ecs-task-failure-alarm"
   alarm_description   = "Triggers when the number of RUNNING ECS tasks is lower than DESIRED count."
   namespace           = "AWS/ECS"
@@ -91,15 +92,13 @@ resource "aws_cloudwatch_metric_alarm" "ecs_task_failure" {
   threshold           = 1
   comparison_operator = "LessThanThreshold"
 
-  dimensions = {
+  dimensions = var.ecs_cluster_name != "" ? {
     ClusterName = var.ecs_cluster_name
-  }
+  } : {}
 
   alarm_actions = [aws_sns_topic.ecs_failure_topic.arn]
-
   treat_missing_data = "notBreaching"
 }
-
 
 # ======================================
 # EventBridge Rule - ECS Task Failures
