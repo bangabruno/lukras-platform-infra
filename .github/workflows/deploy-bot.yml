@@ -94,17 +94,19 @@ jobs:
 
             # Demais atributos da task atual
             EXEC_ROLE=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.executionRoleArn' --output text)
+            TASK_ROLE=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.taskRoleArn' --output text)
             NET_MODE=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.networkMode' --output text)
             CPU=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.cpu' --output text)
             MEM=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.memory' --output text)
             REQS=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.requiresCompatibilities' --output json)
             RUNTIME=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.runtimePlatform' --output json)
             VOLUMES=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition.volumes' --output json)
-
+            
             # Registra nova revisão da task definition
             NEW_TD_ARN=$(aws ecs register-task-definition \
               --family "$FAMILY" \
               --execution-role-arn "$EXEC_ROLE" \
+              --task-role-arn "$TASK_ROLE" \
               --network-mode "$NET_MODE" \
               --requires-compatibilities $(echo "$REQS" | jq -r '.[]') \
               --cpu "$CPU" \
@@ -113,7 +115,8 @@ jobs:
               --volumes "$VOLUMES" \
               --container-definitions "$CONTAINERS_JSON" \
               --query 'taskDefinition.taskDefinitionArn' --output text)
-
+          
+          
             echo "✔ Nova task definition: $NEW_TD_ARN"
 
             # Atualiza o service para a nova revisão
