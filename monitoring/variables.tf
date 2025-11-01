@@ -30,3 +30,9 @@ variable "enable_cluster_alarm" {
   type        = bool
   default     = true
 }
+
+variable "ecs_services" {
+  description = "List of ECS service names to monitor."
+  type        = list(string)
+  default     = []
+}
