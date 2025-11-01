@@ -20,13 +20,17 @@ data "aws_caller_identity" "current" {}
 ########################################
 # Variables
 ########################################
-variable "aws_region"     { type = string }
-variable "project_name"   { type = string }
-variable "enable_alb"     { type = bool }
-variable "container_image"{ type = string }
-variable "cpu"            { type = number }
-variable "memory"         { type = number }
-variable "container_port" { type = number }
+variable "aws_region"         { type = string }
+variable "project_name"       { type = string }
+variable "enable_alb"         { type = bool }
+variable "container_image"    { type = string }
+variable "cpu"                { type = number }
+variable "memory"             { type = number }
+variable "container_port"     { type = number }
+variable "ecs_cluster_name"   { type = string }
+variable "ecs_service_name"   { type = string }
+variable "telegram_bot_token" { type = string sensitive = true }
+variable "telegram_chat_id"   { type = string }
 
 # users = { "n8w0lff" = { env = {...}, secrets = [...] } }
 variable "users" {
@@ -36,6 +40,20 @@ variable "users" {
     secrets = list(string)
   }))
 }
+
+
+########################################
+# MONITORING (TELEGRAM BOT)
+########################################
+module "monitoring" {
+  source             = "./monitoring"
+  aws_region         = var.aws_region
+  ecs_cluster_name   = var.ecs_cluster_name
+  ecs_service_name   = var.ecs_service_name
+  telegram_bot_token = var.telegram_bot_token
+  telegram_chat_id   = var.telegram_chat_id
+}
+
 
 ########################################
 # Existing Infrastructure (data sources only)
