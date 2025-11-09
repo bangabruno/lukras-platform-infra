@@ -83,70 +83,6 @@ resource "aws_security_group" "admin_tasks" {
 }
 
 ########################################
-# ALB (HTTP + optional HTTPS)
-########################################
-resource "aws_lb" "admin" {
-  count              = var.admin_enable_alb ? 1 : 0
-  name               = "${var.project_name}-admin-alb"
-  load_balancer_type = "application"
-  internal           = false
-  subnets            = var.public_subnet_ids
-  security_groups    = [aws_security_group.alb_admin.id]
-}
-
-resource "aws_lb_target_group" "admin" {
-  count       = var.admin_enable_alb ? 1 : 0
-  name        = "${var.project_name}-admin-tg"
-  port        = var.admin_container_port
-  protocol    = "HTTP"
-  vpc_id      = data.aws_vpc.main.id
-  target_type = "ip"
-
-  health_check {
-    path                = "/actuator/health"
-    interval            = 30
-    timeout             = 5
-    healthy_threshold   = 2
-    unhealthy_threshold = 3
-  }
-}
-
-resource "aws_lb_listener" "admin_http" {
-  count             = var.admin_enable_alb ? 1 : 0
-  load_balancer_arn = aws_lb.admin[0].arn
-  port              = 80
-  protocol          = "HTTP"
-
-  default_action {
-    type             = length(var.admin_acm_certificate_arn) > 0 ? "redirect" : "forward"
-    target_group_arn = length(var.admin_acm_certificate_arn) > 0 ? null : aws_lb_target_group.admin[0].arn
-
-    dynamic "redirect" {
-      for_each = length(var.admin_acm_certificate_arn) > 0 ? [1] : []
-      content {
-        protocol    = "HTTPS"
-        port        = "443"
-        status_code = "HTTP_301"
-      }
-    }
-  }
-}
-
-resource "aws_lb_listener" "admin_https" {
-  count             = var.admin_enable_alb && length(var.admin_acm_certificate_arn) > 0 ? 1 : 0
-  load_balancer_arn = aws_lb.admin[0].arn
-  port              = 443
-  protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-2016-08"
-  certificate_arn   = var.admin_acm_certificate_arn
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.admin[0].arn
-  }
-}
-
-########################################
 # IAM permissions (generic DynamoDB access)
 ########################################
 data "aws_iam_policy_document" "dynamo_generic_access" {
@@ -238,7 +174,6 @@ resource "aws_ecs_service" "admin" {
   task_definition        = aws_ecs_task_definition.admin.arn
   desired_count          = var.admin_desired_count
   enable_execute_command = true
-  launch_type            = "FARGATE"
 
   capacity_provider_strategy {
     capacity_provider = "FARGATE_SPOT"
@@ -251,29 +186,8 @@ resource "aws_ecs_service" "admin" {
     assign_public_ip = true
   }
 
-  dynamic "load_balancer" {
-    for_each = var.admin_enable_alb ? [1] : []
-    content {
-      target_group_arn = aws_lb_target_group.admin[0].arn
-      container_name   = "admin"
-      container_port   = var.admin_container_port
-    }
-  }
-
   deployment_minimum_healthy_percent = 50
   deployment_maximum_percent         = 200
 
   depends_on = [aws_iam_role_policy.shared_dynamo_access]
-}
-
-########################################
-# MONITORING (reuse Telegram Lambda)
-########################################
-module "admin_monitoring" {
-  source             = "../monitoring"
-  aws_region         = var.aws_region
-  ecs_cluster_name   = "${var.project_name}-cluster"
-  telegram_bot_token = var.telegram_bot_token
-  telegram_chat_id   = var.telegram_chat_id
-  ecs_services       = [aws_ecs_service.admin.name]
 }

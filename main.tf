@@ -363,10 +363,6 @@ module "admin" {
   admin_desired_count      = 2
   admin_enable_alb         = true
   admin_acm_certificate_arn = "" # informe a ARN para ativar HTTPS
-
-  # Alerts (reuso do mesmo Telegram)
-  telegram_bot_token       = var.telegram_bot_token
-  telegram_chat_id         = var.telegram_chat_id
 }
 
 ########################################

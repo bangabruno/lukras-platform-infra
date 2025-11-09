@@ -8,13 +8,14 @@ variable "task_execution_role_arn"   { type = string }
 variable "task_role_arn"             { type = string }
 variable "task_role_name"            { type = string }
 
-variable "telegram_bot_token"        { type = string }
-variable "telegram_chat_id"          { type = string }
-
 # Admin service
+# ==========================================
+# Variable for Admin service container image
+# ==========================================
 variable "admin_container_image" {
-  type = string
-  default = "659528245383.dkr.ecr.us-east-1.amazonaws.com/lukras-platform-admin:latest"
+  description = "ECR image for lukras-platform-admin service"
+  type        = string
+  default     = "659528245383.dkr.ecr.us-east-1.amazonaws.com/lukras-platform-admin:latest"
 }
 variable "admin_cpu" {
   type = number
@@ -34,7 +35,7 @@ variable "admin_desired_count" {
 }
 variable "admin_enable_alb" {
   type = bool
-  default = true
+  default = false
 }
 variable "admin_acm_certificate_arn" {
   type = string
