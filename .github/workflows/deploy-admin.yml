@@ -1,0 +1,50 @@
+name: Deploy admin (infra only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_new_deployment:
+        description: "Force ECS new deployment after Terraform (pull latest image tag)"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-admin:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      CLUSTER_NAME: lukras-platform-cluster
+      SERVICE_NAME: lukras-platform-admin
+
+    steps:
+      - name: Checkout infra repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::659528245383:role/GitHubOIDCDeployRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform init
+        run: terraform init -input=false
+
+      - name: Terraform plan (target only admin module)
+        run: terraform plan -input=false -target=module.admin -out=tf.plan
+
+      - name: Terraform apply (admin only)
+        run: terraform apply -input=false -auto-approve tf.plan
+
+      - name: Force new deployment (optional)
+        if: ${{ inputs.force_new_deployment == 'true' }}
+        run: |
+          aws ecs update-service \
+            --cluster "${{ env.CLUSTER_NAME }}" \
+            --service "${{ env.SERVICE_NAME }}" \
+            --force-new-deployment

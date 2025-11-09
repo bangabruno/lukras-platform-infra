@@ -350,3 +350,47 @@ output "bot_services" {
     }
   }
 }
+
+########################################
+# ADMIN MODULE
+########################################
+module "admin" {
+  source                   = "./admin"
+  aws_region               = var.aws_region
+  project_name             = var.project_name
+
+  cluster_arn              = data.aws_ecs_cluster.main.arn
+  public_subnet_ids        = local.public_subnet_ids
+  log_group_name           = data.aws_cloudwatch_log_group.ecs.name
+  efs_id                   = data.aws_efs_file_system.bot_logs.id
+
+  task_execution_role_arn  = data.aws_iam_role.task_execution_role.arn
+  task_role_arn            = data.aws_iam_role.task_role.arn
+  task_role_name           = data.aws_iam_role.task_role.name
+
+  # DynamoDB
+  dynamodb_table_name      = "account_user_trading_settings"
+
+  # Admin service defaults (pode deixar assim ou mover para tfvars)
+  admin_container_image    = "659528245383.dkr.ecr.us-east-1.amazonaws.com/lukras-platform-admin:latest"
+  admin_cpu                = 256
+  admin_memory             = 512
+  admin_container_port     = 8080
+  admin_desired_count      = 2
+  admin_enable_alb         = true
+  admin_acm_certificate_arn = "" # informe a ARN para ativar HTTPS
+
+  # Alerts (reuso do mesmo Telegram)
+  telegram_bot_token       = var.telegram_bot_token
+  telegram_chat_id         = var.telegram_chat_id
+}
+
+# Atualize o módulo monitoring para incluir o admin
+module "monitoring" {
+  source             = "./monitoring"
+  aws_region         = var.aws_region
+  ecs_cluster_name   = "${var.project_name}-cluster"
+  telegram_bot_token = var.telegram_bot_token
+  telegram_chat_id   = var.telegram_chat_id
+  ecs_services       = concat([for svc in aws_ecs_service.bot : svc.name], [module.admin.admin_service_name])
+}
