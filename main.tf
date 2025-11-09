@@ -142,6 +142,54 @@ resource "aws_iam_role_policy" "task_role_ecs_exec" {
   policy = data.aws_iam_policy_document.ecs_exec.json
 }
 
+# IAM Policy for DynamoDB access
+resource "aws_iam_role_policy" "task_role_dynamodb" {
+  name   = "${var.project_name}-task-dynamodb-access"
+  role   = data.aws_iam_role.task_role.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "AllowBasicDynamoOperations"
+        Effect   = "Allow"
+        Action   = [
+          "dynamodb:ListTables",
+          "dynamodb:DescribeTable",
+          "dynamodb:CreateTable",
+          "dynamodb:UpdateTable",
+          "dynamodb:DeleteTable",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:GetItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ]
+        Resource = "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/*"
+      },
+      {
+        Sid    = "AllowDynamoIndexAccess"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ]
+        Resource = "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/*/index/*"
+      },
+      {
+        Sid    = "AllowCloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 ########################################
 # NEW Security Group - Optimized for bots
 ########################################
