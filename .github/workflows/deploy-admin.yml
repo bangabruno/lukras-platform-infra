@@ -1,50 +1,80 @@
-name: Deploy admin (infra only)
+name: Deploy admin service
 
 on:
   workflow_dispatch:
     inputs:
-      force_new_deployment:
-        description: "Force ECS new deployment after Terraform (pull latest image tag)"
+      image_tag:
+        description: "Tag da imagem (ex: latest ou sha)"
         required: false
-        default: "true"
-        type: choice
-        options: ["true", "false"]
+        default: "latest"
+        type: string
 
 permissions:
   id-token: write
   contents: read
 
+env:
+  AWS_REGION: us-east-1
+  PROJECT_NAME: lukras-platform
+  ECR_REPO: 659528245383.dkr.ecr.us-east-1.amazonaws.com/lukras-platform-admin
+  TF_WORKING_DIR: infra
+
 jobs:
   deploy-admin:
     runs-on: ubuntu-latest
-    env:
-      AWS_REGION: us-east-1
-      CLUSTER_NAME: lukras-platform-cluster
-      SERVICE_NAME: lukras-platform-admin
+    environment: prod
 
     steps:
-      - name: Checkout infra repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Configure AWS (OIDC)
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::659528245383:role/GitHubOIDCDeployRole
+          role-to-assume: arn:aws:iam::659528245383:role/github-oidc-role
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Terraform init
-        run: terraform init -input=false
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Terraform plan (target only admin module)
-        run: terraform plan -input=false -target=module.admin -out=tf.plan
-
-      - name: Terraform apply (admin only)
-        run: terraform apply -input=false -auto-approve tf.plan
-
-      - name: Force new deployment (optional)
-        if: ${{ inputs.force_new_deployment == 'true' }}
+      - name: Pull latest image (verify existence)
         run: |
+          echo "Checking if image exists in ECR..."
+          IMAGE="${{ env.ECR_REPO }}:${{ github.event.inputs.image_tag }}"
+          aws ecr describe-images \
+            --repository-name lukras-platform-admin \
+            --image-ids imageTag=${{ github.event.inputs.image_tag }} \
+            >/dev/null || {
+              echo "❌ Image tag '${{ github.event.inputs.image_tag }}' not found in ECR."
+              exit 1
+            }
+          echo "✅ Found image: $IMAGE"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+
+      - name: Terraform Init (admin only)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform init -upgrade
+
+      - name: Terraform Apply (admin module only)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform apply \
+            -auto-approve \
+            -target=module.admin \
+            -var="admin_container_image=${{ env.ECR_REPO }}:${{ github.event.inputs.image_tag }}"
+
+      - name: Force new ECS deployment
+        run: |
+          SERVICE_NAME="${{ env.PROJECT_NAME }}-admin"
+          CLUSTER_ARN=$(aws ecs list-clusters --query "clusterArns[?contains(@, '${{ env.PROJECT_NAME }}-cluster')]" --output text)
+          echo "🔄 Forcing new ECS deployment for $SERVICE_NAME in cluster $CLUSTER_ARN"
           aws ecs update-service \
-            --cluster "${{ env.CLUSTER_NAME }}" \
-            --service "${{ env.SERVICE_NAME }}" \
-            --force-new-deployment
+            --cluster "$CLUSTER_ARN" \
+            --service "$SERVICE_NAME" \
+            --force-new-deployment >/dev/null
+          echo "✅ ECS service '$SERVICE_NAME' updated successfully"
