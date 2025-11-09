@@ -17,7 +17,7 @@ env:
   AWS_REGION: us-east-1
   PROJECT_NAME: lukras-platform
   ECR_REPO: 659528245383.dkr.ecr.us-east-1.amazonaws.com/lukras-platform-admin
-  TF_WORKING_DIR: admin
+  TF_WORKING_DIR: .
 
 jobs:
   deploy-admin:
@@ -55,16 +55,20 @@ jobs:
         with:
           terraform_version: 1.9.5
 
-      - name: Terraform Init (admin only)
+      - name: Terraform Init (root)
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: |
-          terraform init -upgrade
+        run: terraform init -upgrade
 
       - name: Terraform Apply (admin module only)
         working-directory: ${{ env.TF_WORKING_DIR }}
+        env:
+          TF_INPUT: "0"
+          TF_IN_AUTOMATION: "1"
         run: |
           terraform apply \
             -auto-approve \
+            -input=false \
+            -lock-timeout=5m \
             -target=module.admin \
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="project_name=${{ env.PROJECT_NAME }}" \
@@ -73,12 +77,13 @@ jobs:
             -var="admin_container_image=${{ env.ECR_REPO }}:${{ github.event.inputs.image_tag }}"
 
       - name: Force new ECS deployment
+        env:
+          CLUSTER_NAME: ${{ env.PROJECT_NAME }}-cluster
         run: |
           SERVICE_NAME="${{ env.PROJECT_NAME }}-admin"
-          CLUSTER_ARN=$(aws ecs list-clusters --query "clusterArns[?contains(@, '${{ env.PROJECT_NAME }}-cluster')]" --output text)
-          echo "🔄 Forcing new ECS deployment for $SERVICE_NAME in cluster $CLUSTER_ARN"
           aws ecs update-service \
-            --cluster "$CLUSTER_ARN" \
+            --cluster "$CLUSTER_NAME" \
             --service "$SERVICE_NAME" \
             --force-new-deployment >/dev/null
           echo "✅ ECS service '$SERVICE_NAME' updated successfully"
+      
