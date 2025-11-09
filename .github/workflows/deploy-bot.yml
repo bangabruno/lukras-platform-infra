@@ -1,4 +1,4 @@
-name: Deploy bot (one or all)
+name: Deploy module bot (one or all)
 
 on:
   workflow_dispatch:
