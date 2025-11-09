@@ -359,7 +359,7 @@ module "admin" {
   ecs_cluster_arn     = data.aws_ecs_cluster.main.arn
   log_group_name      = data.aws_cloudwatch_log_group.ecs.name
   task_execution_role = data.aws_iam_role.task_execution_role.arn
-  task_role_name      = data.aws_iam_role.task_role.name
+  task_role_arn       = data.aws_iam_role.task_role.arn
   public_subnet_ids   = local.public_subnet_ids
 }
 

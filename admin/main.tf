@@ -52,7 +52,7 @@ resource "aws_ecs_task_definition" "admin" {
   cpu                      = "512"
   memory                   = "1024"
   execution_role_arn       = var.task_execution_role
-  task_role_arn            = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.task_role_name}"
+  task_role_arn            = var.task_role_arn
 
   runtime_platform {
     cpu_architecture        = "ARM64"
