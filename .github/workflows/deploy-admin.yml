@@ -66,6 +66,10 @@ jobs:
           terraform apply \
             -auto-approve \
             -target=module.admin \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="telegram_chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -var="telegram_bot_token=${{ secrets.TELEGRAM_BOT_TOKEN }}" \
             -var="admin_container_image=${{ env.ECR_REPO }}:${{ github.event.inputs.image_tag }}"
 
       - name: Force new ECS deployment
