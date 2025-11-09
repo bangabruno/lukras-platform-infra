@@ -1,4 +1,4 @@
-name: Deploy admin
+name: Deploy module Admin
 
 on:
   workflow_dispatch:
