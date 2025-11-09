@@ -17,7 +17,7 @@ env:
   AWS_REGION: us-east-1
   PROJECT_NAME: lukras-platform
   ECR_REPO: 659528245383.dkr.ecr.us-east-1.amazonaws.com/lukras-platform-admin
-  TF_WORKING_DIR: infra
+  TF_WORKING_DIR: admin
 
 jobs:
   deploy-admin:
