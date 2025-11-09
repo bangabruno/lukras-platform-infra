@@ -11,58 +11,20 @@ provider "aws" {
   region = var.aws_region
 }
 
-data "aws_caller_identity" "current" {}
-
-data "aws_vpc" "main" {
-  id = "vpc-04bafb351cafaf66b"
-}
-
 ########################################
-# SECURITY GROUPS
+# Security Group - admin API
 ########################################
-resource "aws_security_group" "alb_admin" {
-  name        = "${var.project_name}-admin-alb-sg"
-  description = "ALB for admin API"
+resource "aws_security_group" "admin_sg" {
+  name        = "${var.project_name}-admin-sg"
+  description = "Security group for lukras-platform-admin API"
   vpc_id      = data.aws_vpc.main.id
 
   ingress {
-    description = "HTTP access"
-    from_port   = 80
-    to_port     = 80
+    description = "Allow HTTP access for frontend"
+    from_port   = 8080
+    to_port     = 8080
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  dynamic "ingress" {
-    for_each = length(var.admin_acm_certificate_arn) > 0 ? [1] : []
-    content {
-      description = "HTTPS access"
-      from_port   = 443
-      to_port     = 443
-      protocol    = "tcp"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-resource "aws_security_group" "admin_tasks" {
-  name        = "${var.project_name}-admin-tasks-sg"
-  description = "Admin ECS tasks"
-  vpc_id      = data.aws_vpc.main.id
-
-  ingress {
-    description     = "Allow ALB to reach ECS tasks"
-    from_port       = var.admin_container_port
-    to_port         = var.admin_container_port
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb_admin.id]
   }
 
   egress {
@@ -73,82 +35,41 @@ resource "aws_security_group" "admin_tasks" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  egress {
-    description = "Allow NFS access to EFS"
-    from_port   = 2049
-    to_port     = 2049
-    protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/16"]
+  tags = {
+    Name        = "${var.project_name}-admin-sg"
+    Environment = "production"
+    ManagedBy   = "Terraform"
   }
 }
 
 ########################################
-# IAM permissions (generic DynamoDB access)
-########################################
-data "aws_iam_policy_document" "dynamo_generic_access" {
-  statement {
-    sid     = "AllowAdminAndBotsAccessToDynamoDB"
-    actions = [
-      "dynamodb:DescribeTable",
-      "dynamodb:GetItem",
-      "dynamodb:PutItem",
-      "dynamodb:UpdateItem",
-      "dynamodb:Query",
-      "dynamodb:Scan",
-      "dynamodb:CreateTable"
-    ]
-    resources = [
-      "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/*",
-      "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/*/index/*"
-    ]
-  }
-}
-
-resource "aws_iam_role_policy" "shared_dynamo_access" {
-  name   = "${var.project_name}-shared-dynamo-access"
-  role   = var.task_role_name
-  policy = data.aws_iam_policy_document.dynamo_generic_access.json
-}
-
-########################################
-# ECS Task Definition + Service (Fargate Spot)
+# ECS Task Definition (lukras-platform-admin)
 ########################################
 resource "aws_ecs_task_definition" "admin" {
   family                   = "${var.project_name}-admin"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = tostring(var.admin_cpu)
-  memory                   = tostring(var.admin_memory)
-  execution_role_arn       = var.task_execution_role_arn
-  task_role_arn            = var.task_role_arn
+  cpu                      = "512"
+  memory                   = "1024"
+  execution_role_arn       = var.task_execution_role
+  task_role_arn            = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.task_role_name}"
 
   runtime_platform {
     cpu_architecture        = "ARM64"
     operating_system_family = "LINUX"
   }
 
-  volume {
-    name = "logs"
-    efs_volume_configuration {
-      file_system_id     = var.efs_id
-      transit_encryption = "ENABLED"
-      root_directory     = "/"
-    }
-  }
-
   container_definitions = jsonencode([
     {
-      name  = "admin"
-      image = var.admin_container_image
-      portMappings = [{
-        containerPort = var.admin_container_port
-        hostPort      = var.admin_container_port
-        protocol      = "tcp"
-      }]
-      mountPoints = [{
-        sourceVolume  = "logs"
-        containerPath = "/app/logs"
-      }]
+      name  = "lukras-platform-admin"
+      image = var.container_image
+      portMappings = [
+        {
+          containerPort = 8080
+          hostPort      = 8080
+          protocol      = "tcp"
+        }
+      ]
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -158,21 +79,30 @@ resource "aws_ecs_task_definition" "admin" {
         }
       }
       healthCheck = {
-        command     = ["CMD-SHELL", "curl -f http://localhost:${var.admin_container_port}/actuator/health || exit 1"]
+        command     = ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health || exit 1"]
         interval    = 30
         timeout     = 5
         retries     = 3
         startPeriod = 60
       }
+      environment = [
+        {
+          name  = "SPRING_PROFILES_ACTIVE"
+          value = "prod"
+        }
+      ]
     }
   ])
 }
 
+########################################
+# ECS Service - admin (2 tasks, Spot)
+########################################
 resource "aws_ecs_service" "admin" {
-  name                   = "${var.project_name}-admin"
-  cluster                = var.cluster_arn
-  task_definition        = aws_ecs_task_definition.admin.arn
-  desired_count          = var.admin_desired_count
+  name            = "${var.project_name}-admin"
+  cluster         = var.ecs_cluster_arn
+  task_definition = aws_ecs_task_definition.admin.arn
+  desired_count   = 2
   enable_execute_command = true
 
   capacity_provider_strategy {
@@ -182,12 +112,56 @@ resource "aws_ecs_service" "admin" {
 
   network_configuration {
     subnets          = var.public_subnet_ids
-    security_groups  = [aws_security_group.admin_tasks.id]
     assign_public_ip = true
+    security_groups  = [aws_security_group.admin_sg.id]
   }
 
-  deployment_minimum_healthy_percent = 50
+  deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
 
-  depends_on = [aws_iam_role_policy.shared_dynamo_access]
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+
+  tags = {
+    Service     = "lukras-platform-admin"
+    Environment = "production"
+    ManagedBy   = "Terraform"
+  }
 }
+
+########################################
+# CloudWatch alarm (reuse same SNS topic)
+########################################
+resource "aws_cloudwatch_metric_alarm" "admin_task_health" {
+  alarm_name          = "ecs-admin-task-health"
+  alarm_description   = "Triggered if lukras-platform-admin has 0 running tasks"
+  namespace           = "AWS/ECS"
+  metric_name         = "RunningTaskCount"
+  statistic           = "Average"
+  period              = 60
+  evaluation_periods  = 2
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+
+  dimensions = {
+    ClusterName = replace(var.ecs_cluster_arn, "arn:aws:ecs:${var.aws_region}::cluster/", "")
+    ServiceName = aws_ecs_service.admin.name
+  }
+
+  alarm_actions      = [data.aws_sns_topic.existing_sns.arn]
+  treat_missing_data = "notBreaching"
+}
+
+########################################
+# Data Sources
+########################################
+data "aws_vpc" "main" {
+  id = "vpc-04bafb351cafaf66b"
+}
+
+data "aws_sns_topic" "existing_sns" {
+  name = "ecs-task-failure-topic"
+}
+
+data "aws_caller_identity" "current" {}

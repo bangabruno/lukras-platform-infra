@@ -43,6 +43,11 @@ variable "users" {
   }))
 }
 
+variable "admin_container_image" {
+  description = "Container image for lukras-platform-admin service"
+  type        = string
+  default     = "659528245383.dkr.ecr.us-east-1.amazonaws.com/lukras-platform-admin:latest"
+}
 ########################################
 # Existing Infrastructure (data sources only)
 ########################################
@@ -341,28 +346,21 @@ output "bot_services" {
 ########################################
 # ADMIN MODULE
 ########################################
+########################################
+# ADMIN MODULE
+########################################
 module "admin" {
-  source                   = "./admin"
-  aws_region               = var.aws_region
-  project_name             = var.project_name
+  source = "./admin"
 
-  cluster_arn              = data.aws_ecs_cluster.main.arn
-  public_subnet_ids        = local.public_subnet_ids
-  log_group_name           = data.aws_cloudwatch_log_group.ecs.name
-  efs_id                   = data.aws_efs_file_system.bot_logs.id
+  aws_region          = var.aws_region
+  project_name        = var.project_name
+  container_image     = var.admin_container_image
 
-  task_execution_role_arn  = data.aws_iam_role.task_execution_role.arn
-  task_role_arn            = data.aws_iam_role.task_role.arn
-  task_role_name           = data.aws_iam_role.task_role.name
-
-  # Admin service defaults (pode deixar assim ou mover para tfvars)
-  admin_container_image    = "659528245383.dkr.ecr.us-east-1.amazonaws.com/lukras-platform-admin:latest"
-  admin_cpu                = 256
-  admin_memory             = 512
-  admin_container_port     = 8080
-  admin_desired_count      = 2
-  admin_enable_alb         = true
-  admin_acm_certificate_arn = "" # informe a ARN para ativar HTTPS
+  ecs_cluster_arn     = data.aws_ecs_cluster.main.arn
+  log_group_name      = data.aws_cloudwatch_log_group.ecs.name
+  task_execution_role = data.aws_iam_role.task_execution_role.arn
+  task_role_name      = data.aws_iam_role.task_role.name
+  public_subnet_ids   = local.public_subnet_ids
 }
 
 ########################################
