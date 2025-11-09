@@ -43,19 +43,6 @@ variable "users" {
   }))
 }
 
-
-########################################
-# MONITORING (TELEGRAM BOT)
-########################################
-module "monitoring" {
-  source             = "./monitoring"
-  aws_region         = var.aws_region
-  ecs_cluster_name   = "${var.project_name}-cluster"
-  telegram_bot_token = var.telegram_bot_token
-  telegram_chat_id   = var.telegram_chat_id
-  ecs_services       = [for svc in aws_ecs_service.bot : svc.name]
-}
-
 ########################################
 # Existing Infrastructure (data sources only)
 ########################################
@@ -368,9 +355,6 @@ module "admin" {
   task_role_arn            = data.aws_iam_role.task_role.arn
   task_role_name           = data.aws_iam_role.task_role.name
 
-  # DynamoDB
-  dynamodb_table_name      = "account_user_trading_settings"
-
   # Admin service defaults (pode deixar assim ou mover para tfvars)
   admin_container_image    = "659528245383.dkr.ecr.us-east-1.amazonaws.com/lukras-platform-admin:latest"
   admin_cpu                = 256
@@ -385,7 +369,9 @@ module "admin" {
   telegram_chat_id         = var.telegram_chat_id
 }
 
-# Atualize o módulo monitoring para incluir o admin
+########################################
+# MONITORING (TELEGRAM BOT)
+########################################
 module "monitoring" {
   source             = "./monitoring"
   aws_region         = var.aws_region

@@ -12,13 +12,32 @@ variable "telegram_bot_token"        { type = string }
 variable "telegram_chat_id"          { type = string }
 
 # Admin service
-variable "admin_container_image"     { type = string, default = "659528245383.dkr.ecr.us-east-1.amazonaws.com/lukras-platform-admin:latest" }
-variable "admin_cpu"                 { type = number, default = 256 }
-variable "admin_memory"              { type = number, default = 512 }
-variable "admin_container_port"      { type = number, default = 8080 }
-variable "admin_desired_count"       { type = number, default = 2 }
-variable "admin_enable_alb"          { type = bool,   default = true }
-variable "admin_acm_certificate_arn" { type = string, default = "", nullable = true }
-
-# DynamoDB
-variable "dynamodb_table_name"       { type = string, default = "account_user_trading_settings" }
+variable "admin_container_image" {
+  type = string
+  default = "659528245383.dkr.ecr.us-east-1.amazonaws.com/lukras-platform-admin:latest"
+}
+variable "admin_cpu" {
+  type = number
+  default = 256
+}
+variable "admin_memory" {
+  type = number
+  default = 512
+}
+variable "admin_container_port" {
+  type = number
+  default = 8080
+}
+variable "admin_desired_count" {
+  type = number
+  default = 2
+}
+variable "admin_enable_alb" {
+  type = bool
+  default = true
+}
+variable "admin_acm_certificate_arn" {
+  type = string
+  default = ""
+  nullable = true
+}
