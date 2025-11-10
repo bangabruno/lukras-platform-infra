@@ -27,7 +27,6 @@ resource "aws_security_group" "admin_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # CRÍTICO: Permitir acesso ao DynamoDB (via HTTPS)
   egress {
     description = "Allow HTTPS outbound (DynamoDB, Secrets Manager, etc)"
     from_port   = 443
@@ -36,7 +35,6 @@ resource "aws_security_group" "admin_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Permitir DNS resolution
   egress {
     description = "Allow DNS"
     from_port   = 53
@@ -93,7 +91,7 @@ resource "aws_ecs_task_definition" "admin" {
         interval    = 30
         timeout     = 5
         retries     = 3
-        startPeriod = 120  # Aumentado para 120s para dar tempo das migrations
+        startPeriod = 120
       }
       environment = [
         {
@@ -137,9 +135,8 @@ resource "aws_ecs_service" "admin" {
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
 
-  lifecycle {
-    ignore_changes = [task_definition]
-  }
+  # REMOVIDO: ignore_changes = [task_definition]
+  # Agora o Terraform vai atualizar a task definition quando a imagem mudar
 
   tags = {
     Service     = "lukras-platform-admin"
