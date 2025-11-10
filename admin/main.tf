@@ -27,11 +27,21 @@ resource "aws_security_group" "admin_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # CRÍTICO: Permitir acesso ao DynamoDB (via HTTPS)
   egress {
-    description = "Allow HTTPS outbound"
+    description = "Allow HTTPS outbound (DynamoDB, Secrets Manager, etc)"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Permitir DNS resolution
+  egress {
+    description = "Allow DNS"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
@@ -83,12 +93,20 @@ resource "aws_ecs_task_definition" "admin" {
         interval    = 30
         timeout     = 5
         retries     = 3
-        startPeriod = 60
+        startPeriod = 120  # Aumentado para 120s para dar tempo das migrations
       }
       environment = [
         {
           name  = "SPRING_PROFILES_ACTIVE"
           value = "prod"
+        },
+        {
+          name  = "AWS_REGION"
+          value = var.aws_region
+        },
+        {
+          name  = "JAVA_TOOL_OPTIONS"
+          value = "-XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/./urandom"
         }
       ]
     }
