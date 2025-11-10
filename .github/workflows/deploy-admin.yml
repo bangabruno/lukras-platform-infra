@@ -65,6 +65,14 @@ jobs:
           TF_INPUT: "0"
           TF_IN_AUTOMATION: "1"
         run: |
+          DIGEST=$(aws ecr describe-images \
+            --repository-name lukras-platform-admin \
+            --image-ids imageTag=${{ github.event.inputs.image_tag }} \
+            --query "imageDetails[0].imageDigest" \
+            --output text)
+
+          echo "✅ Using image digest: $DIGEST"
+
           terraform apply \
             -auto-approve \
             -input=false \
@@ -74,7 +82,7 @@ jobs:
             -var="project_name=${{ env.PROJECT_NAME }}" \
             -var="telegram_chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             -var="telegram_bot_token=${{ secrets.TELEGRAM_BOT_TOKEN }}" \
-            -var="admin_container_image=${{ env.ECR_REPO }}:${{ github.event.inputs.image_tag }}"
+            -var="admin_container_image=${{ env.ECR_REPO }}@${DIGEST}"
 
       - name: Force new ECS deployment
         env:
