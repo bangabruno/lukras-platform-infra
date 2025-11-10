@@ -38,17 +38,29 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Pull latest image (verify existence)
+        id: get_image
         run: |
           echo "Checking if image exists in ECR..."
-          IMAGE="${{ env.ECR_REPO }}:${{ github.event.inputs.image_tag }}"
+          IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          
           aws ecr describe-images \
             --repository-name lukras-platform-admin \
-            --image-ids imageTag=${{ github.event.inputs.image_tag }} \
+            --image-ids imageTag=${IMAGE_TAG} \
             >/dev/null || {
-              echo "❌ Image tag '${{ github.event.inputs.image_tag }}' not found in ECR."
+              echo "❌ Image tag '${IMAGE_TAG}' not found in ECR."
               exit 1
             }
-          echo "✅ Found image: $IMAGE"
+          
+          DIGEST=$(aws ecr describe-images \
+            --repository-name lukras-platform-admin \
+            --image-ids imageTag=${IMAGE_TAG} \
+            --query "imageDetails[0].imageDigest" \
+            --output text)
+          
+          FULL_IMAGE="${{ env.ECR_REPO }}@${DIGEST}"
+          
+          echo "✅ Found image: $FULL_IMAGE"
+          echo "image_uri=${FULL_IMAGE}" >> $GITHUB_OUTPUT
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -65,14 +77,10 @@ jobs:
           TF_INPUT: "0"
           TF_IN_AUTOMATION: "1"
         run: |
-          DIGEST=$(aws ecr describe-images \
-            --repository-name lukras-platform-admin \
-            --image-ids imageTag=${{ github.event.inputs.image_tag }} \
-            --query "imageDetails[0].imageDigest" \
-            --output text)
-
-          echo "✅ Using image digest: $DIGEST"
-
+          echo "🚀 Deploying with image: ${{ steps.get_image.outputs.image_uri }}"
+          
+          # CRÍTICO: Passar TODAS as variáveis necessárias, incluindo a variável users
+          # mesmo que não esteja sendo alterada (senão Terraform vai usar cached value)
           terraform apply \
             -auto-approve \
             -input=false \
@@ -82,13 +90,21 @@ jobs:
             -var="project_name=${{ env.PROJECT_NAME }}" \
             -var="telegram_chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             -var="telegram_bot_token=${{ secrets.TELEGRAM_BOT_TOKEN }}" \
-            -var="admin_container_image=${{ env.ECR_REPO }}@${DIGEST}"
+            -var="admin_container_image=${{ steps.get_image.outputs.image_uri }}" \
+            -var='users={}' \
+            -var='enable_alb=false' \
+            -var='container_image=dummy' \
+            -var='cpu=256' \
+            -var='memory=512' \
+            -var='container_port=8080'
 
       - name: Force new ECS deployment
         env:
           CLUSTER_NAME: ${{ env.PROJECT_NAME }}-cluster
         run: |
           SERVICE_NAME="${{ env.PROJECT_NAME }}-admin"
+          
+          # Obter a última task definition registrada
           NEW_TD_ARN=$(aws ecs list-task-definitions \
             --family-prefix "$SERVICE_NAME" \
             --sort DESC --max-items 1 \
@@ -96,12 +112,50 @@ jobs:
 
           echo "✅ Found latest task definition: $NEW_TD_ARN"
 
+          # Forçar novo deployment
           aws ecs update-service \
             --cluster "$CLUSTER_NAME" \
             --service "$SERVICE_NAME" \
             --task-definition "$NEW_TD_ARN" \
-            --force-new-deployment >/dev/null
+            --force-new-deployment \
+            --no-cli-pager
 
-          echo "🚀 ECS service '$SERVICE_NAME' updated to latest revision"
-      
-      
+          echo "🚀 ECS service '$SERVICE_NAME' updated with force-new-deployment"
+          
+          # Aguardar deployment estabilizar
+          echo "⏳ Waiting for deployment to complete..."
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER_NAME" \
+            --services "$SERVICE_NAME"
+          
+          echo "✅ Deployment completed successfully!"
+
+      - name: Verify running tasks
+        env:
+          CLUSTER_NAME: ${{ env.PROJECT_NAME }}-cluster
+        run: |
+          SERVICE_NAME="${{ env.PROJECT_NAME }}-admin"
+          
+          # Verificar tasks rodando
+          TASKS=$(aws ecs list-tasks \
+            --cluster "$CLUSTER_NAME" \
+            --service-name "$SERVICE_NAME" \
+            --query "taskArns" --output json)
+          
+          echo "Running tasks: $TASKS"
+          
+          if [ "$TASKS" = "[]" ]; then
+            echo "❌ No tasks running!"
+            exit 1
+          fi
+          
+          # Pegar detalhes da primeira task
+          TASK_ARN=$(echo "$TASKS" | jq -r '.[0]')
+          
+          aws ecs describe-tasks \
+            --cluster "$CLUSTER_NAME" \
+            --tasks "$TASK_ARN" \
+            --query "tasks[0].{Status:lastStatus,Health:healthStatus,Image:containers[0].image}" \
+            --output table
+          
+          echo "✅ Deployment verification complete"
