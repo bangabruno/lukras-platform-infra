@@ -89,9 +89,19 @@ jobs:
           CLUSTER_NAME: ${{ env.PROJECT_NAME }}-cluster
         run: |
           SERVICE_NAME="${{ env.PROJECT_NAME }}-admin"
+          NEW_TD_ARN=$(aws ecs list-task-definitions \
+            --family-prefix "$SERVICE_NAME" \
+            --sort DESC --max-items 1 \
+            --query "taskDefinitionArns[0]" --output text)
+
+          echo "✅ Found latest task definition: $NEW_TD_ARN"
+
           aws ecs update-service \
             --cluster "$CLUSTER_NAME" \
             --service "$SERVICE_NAME" \
+            --task-definition "$NEW_TD_ARN" \
             --force-new-deployment >/dev/null
-          echo "✅ ECS service '$SERVICE_NAME' updated successfully"
+
+          echo "🚀 ECS service '$SERVICE_NAME' updated to latest revision"
+      
       
