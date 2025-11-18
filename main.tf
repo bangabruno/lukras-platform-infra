@@ -343,8 +343,17 @@ resource "aws_ecs_service" "bot" {
   name            = "${var.project_name}-${each.key}"
   cluster         = data.aws_ecs_cluster.main.arn
   task_definition = aws_ecs_task_definition.bot[each.key].arn
-  launch_type     = "FARGATE"
   desired_count   = 1
+
+  capacity_provider_strategy {
+    capacity_provider = "FARGATE_SPOT"
+    weight            = 4
+  }
+
+  capacity_provider_strategy {
+    capacity_provider = "FARGATE"
+    weight            = 1
+  }
 
   enable_execute_command = true
 
