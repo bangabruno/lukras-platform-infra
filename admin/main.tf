@@ -135,9 +135,6 @@ resource "aws_ecs_service" "admin" {
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
 
-  # REMOVIDO: ignore_changes = [task_definition]
-  # Agora o Terraform vai atualizar a task definition quando a imagem mudar
-
   tags = {
     Service     = "lukras-platform-admin"
     Environment = "production"
