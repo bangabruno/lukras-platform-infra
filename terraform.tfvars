@@ -31,10 +31,10 @@ users = {
       HL_ENABLED                             = "true"
       HL_LEVERAGE                            = "10"
       HL_GET_PRICE_EVERY_SECS                = "3"
-      HL_ORDER_MARGIN_ENTRY_USD              = "20"
-      HL_ORDER_PRICE_VARIATION_USD           = "100"
+      HL_ORDER_MARGIN_ENTRY_USD              = "2"
+      HL_ORDER_PRICE_VARIATION_USD           = "20"
       HL_ORDER_TAKE_PROFIT_PERCENT           = "0.006"
-      HL_MAX_MARGIN_ALLOCATED_PERCENT        = "0.5"
+      HL_MAX_MARGIN_ALLOCATED_PERCENT        = "0.1"
     }
     secrets = [
       "LNM_KEY",
