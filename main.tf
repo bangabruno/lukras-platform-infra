@@ -431,3 +431,13 @@ module "monitoring" {
   telegram_chat_id   = var.telegram_chat_id
   ecs_services       = concat([for svc in aws_ecs_service.bot : svc.name], [module.admin.admin_service_name])
 }
+
+########################################
+# STREAM-UPDATES (DYNAMODB) -> (SQS)
+########################################
+module "stream_updates" {
+  source               = "./stream-updates"
+  aws_region           = var.aws_region
+  project_name         = var.project_name
+  dynamodb_table_name  = "account_user_trading_settings"
+}
