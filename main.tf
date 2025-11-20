@@ -190,6 +190,30 @@ resource "aws_iam_role_policy" "task_role_dynamodb" {
   })
 }
 
+# IAM Policy for SQS access
+resource "aws_iam_role_policy" "task_role_sqs" {
+  name = "${var.project_name}-task-sqs-access"
+  role = data.aws_iam_role.task_role.name
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Sid: "AllowSQSActions",
+        Effect: "Allow",
+        Action: [
+          "sqs:SendMessage",
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueUrl",
+          "sqs:GetQueueAttributes"
+        ],
+        Resource: module.queue.settings_updates_queue_arn
+      }
+    ]
+  })
+}
+
 ########################################
 # NEW Security Group - Optimized for bots
 ########################################
@@ -430,4 +454,12 @@ module "monitoring" {
   telegram_bot_token = var.telegram_bot_token
   telegram_chat_id   = var.telegram_chat_id
   ecs_services       = concat([for svc in aws_ecs_service.bot : svc.name], [module.admin.admin_service_name])
+}
+
+########################################
+#  QUEUE (PUB/SUB)
+########################################
+module "queue" {
+  source       = "./queue"
+  project_name = var.project_name
 }
