@@ -190,6 +190,30 @@ resource "aws_iam_role_policy" "task_role_dynamodb" {
   })
 }
 
+# IAM Policy for SQS access
+resource "aws_iam_role_policy" "task_role_sqs" {
+  name = "${var.project_name}-task-sqs-access"
+  role = data.aws_iam_role.task_role.name
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Sid: "AllowSQSActions",
+        Effect: "Allow",
+        Action: [
+          "sqs:SendMessage",
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueUrl",
+          "sqs:GetQueueAttributes"
+        ],
+        Resource: module.queue.settings_updates_queue_arn
+      }
+    ]
+  })
+}
+
 ########################################
 # NEW Security Group - Optimized for bots
 ########################################
@@ -433,11 +457,9 @@ module "monitoring" {
 }
 
 ########################################
-# STREAM-UPDATES (DYNAMODB) -> (SQS)
+#  QUEUE (PUB/SUB)
 ########################################
-module "stream_updates" {
-  source               = "./stream-updates"
-  aws_region           = var.aws_region
-  project_name         = var.project_name
-  dynamodb_table_name  = "account_user_trading_settings"
+module "queue" {
+  source       = "./queue"
+  project_name = var.project_name
 }
