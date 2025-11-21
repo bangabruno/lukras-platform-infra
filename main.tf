@@ -34,11 +34,10 @@ variable "telegram_bot_token" {
   sensitive = true
 }
 
-# users = { "n8w0lff" = { env = {...}, secrets = [...] } }
+# users = { "n8w0lff" = { secrets = [...] } }
 variable "users" {
-  description = "Map of users with environment variables and secrets"
+  description = "Map of users with secrets"
   type = map(object({
-    env     = map(string)
     secrets = list(string)
   }))
 }
