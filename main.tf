@@ -330,12 +330,6 @@ resource "aws_ecs_task_definition" "bot" {
             name  = "BOT_NAME"
             value = each.key
           }
-        ],
-        [
-          for k, v in each.value.env : {
-          name  = k
-          value = v
-        } if v != null && trimspace(v) != ""
         ]
       )
 
