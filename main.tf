@@ -364,8 +364,14 @@ resource "aws_ecs_service" "bot" {
 
   capacity_provider_strategy {
     capacity_provider = "FARGATE_SPOT"
+    weight            = 4
+  }
+
+  capacity_provider_strategy {
+    capacity_provider = "FARGATE"
     weight            = 1
   }
+
 
   enable_execute_command = true
 
