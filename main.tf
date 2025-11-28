@@ -205,7 +205,8 @@ resource "aws_iam_role_policy" "task_role_sqs" {
           "sqs:ReceiveMessage",
           "sqs:DeleteMessage",
           "sqs:GetQueueUrl",
-          "sqs:GetQueueAttributes"
+          "sqs:GetQueueAttributes",
+          "sqs:ChangeMessageVisibility"
         ],
         Resource: module.queue.settings_updates_queue_arn
       }
